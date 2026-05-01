@@ -9,6 +9,7 @@ Run locally:
 ```bash
 python -m compileall apps/api workers/runpod-comfyui scripts
 python scripts/smoke_test.py
+python scripts/security_smoke_test.py
 cd apps/web && npm run build && npm audit --omit=dev
 ```
 
@@ -68,6 +69,8 @@ For billing:
 
 ```text
 BILLING_ENFORCED
+USER_AUTH_ENFORCED
+USER_AUTH_SECRET
 ```
 
 ## 4. Replace Workflow Placeholders
@@ -127,6 +130,8 @@ Before accepting paid users:
 - grant a test wallet enough credits using `/api/admin/billing/grant`
 - create and redeem one coupon using `/api/admin/coupons` and `/api/coupons/redeem`
 - set `BILLING_ENFORCED=true`
+- set `USER_AUTH_ENFORCED=true`
+- issue a user token with `/api/admin/users/token` and verify other users cannot fetch that user's wallet/jobs
 - confirm an underfunded wallet receives `402 Insufficient credits`
 - confirm a failed debited job creates a `refund` ledger row
 - connect your real payment provider so successful purchases call the credit grant path

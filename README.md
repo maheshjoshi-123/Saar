@@ -187,4 +187,6 @@ See [docs/ASSURANCE_PIPELINE.md](docs/ASSURANCE_PIPELINE.md).
 
 Saar includes credit wallets, pricing plans, job cost estimation, admin credit grants, discount coupons, redemption, ledger history, and automatic refunds when a debited generation fails. Set `BILLING_ENFORCED=true` when you want the API to block video generation if the user does not have enough credits.
 
+For production user isolation, set `USER_AUTH_ENFORCED=true`, configure `USER_AUTH_SECRET`, and issue customer access tokens with `POST /api/admin/users/token`.
+
 See [docs/BILLING_AND_TOKENS.md](docs/BILLING_AND_TOKENS.md).

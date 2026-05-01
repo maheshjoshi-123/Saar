@@ -2,21 +2,21 @@ import uuid
 from datetime import datetime
 from pathlib import PurePath
 from contextlib import asynccontextmanager
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from .config import get_settings
 from .db import get_db, init_db
 from .assurance import build_options_from_assurance, confirm_assurance_plan, create_assurance_plan, create_quality_report, create_revision_request, store_feedback_memory
-from .billing import add_credits, debit_credits, estimate_generation_cost, get_wallet, redeem_coupon, seed_default_plans
+from .billing import add_credits, debit_credits, estimate_generation_cost, get_wallet, redeem_coupon, refund_credits, seed_default_plans
 from .context_compiler import compile_generation_context
 from .models import AssurancePlan, AssuranceStatus, Asset, AssetType, Coupon, CreditLedger, CreditWallet, Job, JobEvent, JobStatus, LedgerType, MemoryItem, ModelEndpoint, PricingPlan, PromptVersion, QualityReport, RevisionRequest, TaskType
 from .preflight import check_preflight
 from .r2 import presign_put, public_url_for_key
 from .router import resolve_endpoint
-from .schemas import AssurancePlanResponse, ConfirmAssuranceRequest, CostEstimateRequest, CostEstimateResponse, CouponIn, CouponOut, CreditGrantRequest, CreateJobRequest, DesireIntakeRequest, FeedbackIn, JobEventResponse, JobResponse, LedgerResponse, MemoryItemIn, MemoryItemOut, ModelEndpointIn, ModelEndpointOut, PresignUploadRequest, PresignUploadResponse, PricingPlanIn, PricingPlanOut, PromptVersionResponse, QualityReportResponse, RedeemCouponRequest, RevisionRequestIn, RevisionRequestOut, WalletResponse
-from .security import require_admin_token, require_api_token
+from .schemas import AssurancePlanResponse, ConfirmAssuranceRequest, CostEstimateRequest, CostEstimateResponse, CouponIn, CouponOut, CreditGrantRequest, CreateJobRequest, DesireIntakeRequest, FeedbackIn, JobEventResponse, JobResponse, LedgerResponse, MemoryItemIn, MemoryItemOut, ModelEndpointIn, ModelEndpointOut, PresignUploadRequest, PresignUploadResponse, PricingPlanIn, PricingPlanOut, PromptVersionResponse, QualityReportResponse, RedeemCouponRequest, RevisionRequestIn, RevisionRequestOut, UserTokenRequest, UserTokenResponse, WalletResponse
+from .security import require_admin_token, require_api_token, require_user_scope, sign_user_token
 from .tasks import process_job
 
 
@@ -58,6 +58,17 @@ def _duration_from_options(options: dict) -> int:
         return 6
 
 
+def _scoped_user(user_id: str | None, x_saar_user_id: str | None, x_saar_user_token: str | None) -> str | None:
+    return require_user_scope(user_id, x_saar_user_id, x_saar_user_token)
+
+
+def _assert_job_access(job: Job, user_id: str | None, x_saar_user_id: str | None, x_saar_user_token: str | None) -> None:
+    if settings.user_auth_enforced:
+        _scoped_user(user_id or job.user_id, x_saar_user_id, x_saar_user_token)
+        if job.user_id and user_id and job.user_id != user_id:
+            raise HTTPException(status_code=403, detail="Job does not belong to this user")
+
+
 @app.get("/health")
 def health() -> dict:
     return {"ok": True, "env": settings.saar_env}
@@ -69,7 +80,8 @@ def ready() -> dict:
 
 
 @app.post("/api/assets/presign-upload", response_model=PresignUploadResponse, dependencies=[Depends(require_api_token)])
-def presign_upload(body: PresignUploadRequest, db: Session = Depends(get_db)) -> PresignUploadResponse:
+def presign_upload(body: PresignUploadRequest, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> PresignUploadResponse:
+    body.user_id = _scoped_user(body.user_id, x_saar_user_id, x_saar_user_token)
     safe_name = PurePath(body.filename.replace("\\", "/")).name.replace(" ", "_")
     if not safe_name or safe_name in {".", ".."}:
         raise HTTPException(status_code=400, detail="Invalid filename")
@@ -82,7 +94,8 @@ def presign_upload(body: PresignUploadRequest, db: Session = Depends(get_db)) ->
 
 
 @app.post("/api/jobs", response_model=JobResponse, dependencies=[Depends(require_api_token)])
-def create_job(body: CreateJobRequest, db: Session = Depends(get_db)) -> JobResponse:
+def create_job(body: CreateJobRequest, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> JobResponse:
+    body.user_id = _scoped_user(body.user_id, x_saar_user_id, x_saar_user_token)
     if body.options.get("assurance_plan_id"):
         plan = db.get(AssurancePlan, body.options["assurance_plan_id"])
         if not plan:
@@ -182,12 +195,14 @@ def create_job(body: CreateJobRequest, db: Session = Depends(get_db)) -> JobResp
 
 
 @app.post("/api/assurance/intake", response_model=AssurancePlanResponse, dependencies=[Depends(require_api_token)])
-def assurance_intake(body: DesireIntakeRequest, db: Session = Depends(get_db)) -> AssurancePlan:
+def assurance_intake(body: DesireIntakeRequest, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> AssurancePlan:
+    body.user_id = _scoped_user(body.user_id, x_saar_user_id, x_saar_user_token)
     return create_assurance_plan(db, body)
 
 
 @app.post("/api/jobs/estimate", response_model=CostEstimateResponse, dependencies=[Depends(require_api_token)])
-def estimate_job_cost(body: CostEstimateRequest, db: Session = Depends(get_db)) -> CostEstimateResponse:
+def estimate_job_cost(body: CostEstimateRequest, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> CostEstimateResponse:
+    body.user_id = _scoped_user(body.user_id, x_saar_user_id, x_saar_user_token)
     estimate = estimate_generation_cost(body.task_type, duration_seconds=body.duration_seconds, quality=body.quality, complexity_score=body.complexity_score, model_key=body.model_key)
     wallet = get_wallet(db, body.user_id, create=True) if body.user_id else None
     return CostEstimateResponse(
@@ -198,15 +213,19 @@ def estimate_job_cost(body: CostEstimateRequest, db: Session = Depends(get_db)) 
 
 
 @app.post("/api/assurance/{plan_id}/confirm", response_model=AssurancePlanResponse, dependencies=[Depends(require_api_token)])
-def assurance_confirm(plan_id: str, body: ConfirmAssuranceRequest, db: Session = Depends(get_db)) -> AssurancePlan:
+def assurance_confirm(plan_id: str, body: ConfirmAssuranceRequest, db: Session = Depends(get_db), user_id: str | None = Query(default=None), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> AssurancePlan:
     plan = db.get(AssurancePlan, plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="Assurance plan not found")
+    if settings.user_auth_enforced:
+        _scoped_user(user_id or plan.user_id, x_saar_user_id, x_saar_user_token)
+        if plan.user_id and user_id and plan.user_id != user_id:
+            raise HTTPException(status_code=403, detail="Assurance plan does not belong to this user")
     return confirm_assurance_plan(db, plan, body.selected_concept_id, body.edits)
 
 
 @app.post("/api/assurance/{plan_id}/jobs", response_model=JobResponse, dependencies=[Depends(require_api_token)])
-def create_job_from_assurance(plan_id: str, body: CreateJobRequest, db: Session = Depends(get_db)) -> JobResponse:
+def create_job_from_assurance(plan_id: str, body: CreateJobRequest, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> JobResponse:
     plan = db.get(AssurancePlan, plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="Assurance plan not found")
@@ -214,50 +233,69 @@ def create_job_from_assurance(plan_id: str, body: CreateJobRequest, db: Session 
         raise HTTPException(status_code=400, detail="Assurance plan must be confirmed before generation")
     body.prompt = body.prompt or plan.raw_idea
     body.user_id = body.user_id or plan.user_id
+    body.user_id = _scoped_user(body.user_id, x_saar_user_id, x_saar_user_token)
+    if settings.user_auth_enforced and plan.user_id and body.user_id != plan.user_id:
+        raise HTTPException(status_code=403, detail="Assurance plan does not belong to this user")
     body.options = build_options_from_assurance(plan, {**body.options, "assurance_plan_id": plan.id, "project_id": plan.project_id})
-    return create_job(body, db)
+    return create_job(body, db, x_saar_user_id=x_saar_user_id, x_saar_user_token=x_saar_user_token)
 
 
 @app.get("/api/jobs", response_model=list[JobResponse], dependencies=[Depends(require_api_token)])
-def list_jobs(db: Session = Depends(get_db)) -> list[JobResponse]:
-    jobs = db.execute(select(Job).order_by(Job.created_at.desc()).limit(100)).scalars().all()
+def list_jobs(user_id: str | None = Query(default=None), db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> list[JobResponse]:
+    scoped_user = _scoped_user(user_id, x_saar_user_id, x_saar_user_token)
+    query = select(Job).order_by(Job.created_at.desc()).limit(100)
+    if scoped_user:
+        query = select(Job).where(Job.user_id == scoped_user).order_by(Job.created_at.desc()).limit(100)
+    elif settings.user_auth_enforced:
+        raise HTTPException(status_code=400, detail="user_id is required")
+    jobs = db.execute(query).scalars().all()
     return [to_job_response(job) for job in jobs]
 
 
 @app.get("/api/jobs/{job_id}", response_model=JobResponse, dependencies=[Depends(require_api_token)])
-def get_job(job_id: str, db: Session = Depends(get_db)) -> JobResponse:
+def get_job(job_id: str, user_id: str | None = Query(default=None), db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> JobResponse:
     job = db.get(Job, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    _assert_job_access(job, user_id, x_saar_user_id, x_saar_user_token)
     return to_job_response(job)
 
 
 @app.get("/api/jobs/{job_id}/events", response_model=list[JobEventResponse], dependencies=[Depends(require_api_token)])
-def get_job_events(job_id: str, db: Session = Depends(get_db)) -> list[JobEvent]:
-    if not db.get(Job, job_id):
+def get_job_events(job_id: str, user_id: str | None = Query(default=None), db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> list[JobEvent]:
+    job = db.get(Job, job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    _assert_job_access(job, user_id, x_saar_user_id, x_saar_user_token)
     return list(db.execute(select(JobEvent).where(JobEvent.job_id == job_id).order_by(JobEvent.created_at.asc())).scalars().all())
 
 
 @app.post("/api/jobs/{job_id}/quality-report", response_model=QualityReportResponse, dependencies=[Depends(require_api_token)])
-def generate_quality_report(job_id: str, db: Session = Depends(get_db)) -> QualityReport:
+def generate_quality_report(job_id: str, user_id: str | None = Query(default=None), db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> QualityReport:
     job = db.get(Job, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    _assert_job_access(job, user_id, x_saar_user_id, x_saar_user_token)
     return create_quality_report(db, job)
 
 
 @app.post("/api/revisions", response_model=RevisionRequestOut, dependencies=[Depends(require_api_token)])
-def create_revision(body: RevisionRequestIn, db: Session = Depends(get_db)) -> RevisionRequest:
-    if not db.get(Job, body.job_id):
+def create_revision(body: RevisionRequestIn, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> RevisionRequest:
+    job = db.get(Job, body.job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    body.user_id = _scoped_user(body.user_id or job.user_id, x_saar_user_id, x_saar_user_token)
+    _assert_job_access(job, body.user_id, x_saar_user_id, x_saar_user_token)
     return create_revision_request(db, job_id=body.job_id, user_id=body.user_id, type=body.type, target=body.target, instruction=body.instruction)
 
 
 @app.post("/api/feedback", response_model=list[MemoryItemOut], dependencies=[Depends(require_api_token)])
-def submit_feedback(body: FeedbackIn, db: Session = Depends(get_db)) -> list[MemoryItem]:
-    if not db.get(Job, body.job_id):
+def submit_feedback(body: FeedbackIn, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> list[MemoryItem]:
+    job = db.get(Job, body.job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    body.user_id = _scoped_user(body.user_id or job.user_id, x_saar_user_id, x_saar_user_token)
+    _assert_job_access(job, body.user_id, x_saar_user_id, x_saar_user_token)
     return store_feedback_memory(db, body)
 
 
@@ -285,20 +323,29 @@ def upsert_pricing_plan(body: PricingPlanIn, db: Session = Depends(get_db)) -> P
 
 
 @app.get("/api/billing/wallet", response_model=WalletResponse, dependencies=[Depends(require_api_token)])
-def get_billing_wallet(user_id: str, db: Session = Depends(get_db)) -> CreditWallet:
+def get_billing_wallet(user_id: str, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> CreditWallet:
+    _scoped_user(user_id, x_saar_user_id, x_saar_user_token)
     wallet = get_wallet(db, user_id, create=True)
     assert wallet is not None
     return wallet
 
 
 @app.get("/api/billing/ledger", response_model=list[LedgerResponse], dependencies=[Depends(require_api_token)])
-def get_billing_ledger(user_id: str, db: Session = Depends(get_db)) -> list[CreditLedger]:
+def get_billing_ledger(user_id: str, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> list[CreditLedger]:
+    _scoped_user(user_id, x_saar_user_id, x_saar_user_token)
     return list(db.execute(select(CreditLedger).where(CreditLedger.user_id == user_id).order_by(CreditLedger.created_at.desc()).limit(100)).scalars().all())
 
 
 @app.post("/api/admin/billing/grant", response_model=WalletResponse, dependencies=[Depends(require_admin_token)])
 def admin_grant_credits(body: CreditGrantRequest, db: Session = Depends(get_db)) -> CreditWallet:
     return add_credits(db, user_id=body.user_id, amount=body.amount, reason=body.reason, ledger_type=LedgerType.grant)
+
+
+@app.post("/api/admin/users/token", response_model=UserTokenResponse, dependencies=[Depends(require_admin_token)])
+def admin_issue_user_token(body: UserTokenRequest) -> UserTokenResponse:
+    if not settings.user_auth_secret:
+        raise HTTPException(status_code=503, detail="USER_AUTH_SECRET is required to issue user tokens")
+    return UserTokenResponse(user_id=body.user_id, token=sign_user_token(body.user_id, settings.user_auth_secret))
 
 
 @app.post("/api/admin/coupons", response_model=CouponOut, dependencies=[Depends(require_admin_token)])
@@ -326,7 +373,8 @@ def admin_list_coupons(db: Session = Depends(get_db)) -> list[Coupon]:
 
 
 @app.post("/api/coupons/redeem", response_model=WalletResponse, dependencies=[Depends(require_api_token)])
-def redeem_coupon_endpoint(body: RedeemCouponRequest, db: Session = Depends(get_db)) -> CreditWallet:
+def redeem_coupon_endpoint(body: RedeemCouponRequest, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> CreditWallet:
+    body.user_id = _scoped_user(body.user_id, x_saar_user_id, x_saar_user_token)
     try:
         return redeem_coupon(db, user_id=body.user_id, code=body.code, purchase_credits=body.purchase_credits)
     except ValueError as exc:
@@ -334,7 +382,11 @@ def redeem_coupon_endpoint(body: RedeemCouponRequest, db: Session = Depends(get_
 
 
 @app.get("/api/jobs/{job_id}/prompt-version", response_model=PromptVersionResponse, dependencies=[Depends(require_api_token)])
-def get_prompt_version(job_id: str, db: Session = Depends(get_db)) -> PromptVersion:
+def get_prompt_version(job_id: str, user_id: str | None = Query(default=None), db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> PromptVersion:
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    _assert_job_access(job, user_id, x_saar_user_id, x_saar_user_token)
     row = db.execute(select(PromptVersion).where(PromptVersion.job_id == job_id).order_by(PromptVersion.created_at.desc())).scalars().first()
     if not row:
         raise HTTPException(status_code=404, detail="Prompt version not found")
@@ -342,7 +394,8 @@ def get_prompt_version(job_id: str, db: Session = Depends(get_db)) -> PromptVers
 
 
 @app.post("/api/memory", response_model=MemoryItemOut, dependencies=[Depends(require_api_token)])
-def create_memory(body: MemoryItemIn, db: Session = Depends(get_db)) -> MemoryItem:
+def create_memory(body: MemoryItemIn, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> MemoryItem:
+    body.user_id = _scoped_user(body.user_id, x_saar_user_id, x_saar_user_token)
     item = MemoryItem(
         user_id=body.user_id,
         project_id=body.project_id,
@@ -359,10 +412,13 @@ def create_memory(body: MemoryItemIn, db: Session = Depends(get_db)) -> MemoryIt
 
 
 @app.get("/api/memory", response_model=list[MemoryItemOut], dependencies=[Depends(require_api_token)])
-def list_memory(user_id: str | None = None, project_id: str | None = None, db: Session = Depends(get_db)) -> list[MemoryItem]:
+def list_memory(user_id: str | None = None, project_id: str | None = None, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> list[MemoryItem]:
+    scoped_user = _scoped_user(user_id, x_saar_user_id, x_saar_user_token)
     query = select(MemoryItem).where(MemoryItem.is_active.is_(True))
-    if user_id:
-        query = query.where(MemoryItem.user_id == user_id)
+    if scoped_user:
+        query = query.where(MemoryItem.user_id == scoped_user)
+    elif settings.user_auth_enforced:
+        raise HTTPException(status_code=400, detail="user_id is required")
     if project_id:
         query = query.where(MemoryItem.project_id == project_id)
     return list(db.execute(query.order_by(MemoryItem.priority.asc(), MemoryItem.created_at.desc()).limit(100)).scalars().all())
@@ -405,6 +461,15 @@ def runpod_webhook(payload: dict, x_saar_token: str | None = Header(default=None
         raise HTTPException(status_code=404, detail="Job not found")
     output = payload.get("output") or {}
     if payload.get("status") in {"FAILED", "CANCELLED", "TIMED_OUT"} or (isinstance(output, dict) and output.get("error")):
+        if (
+            job.user_id
+            and isinstance(job.options, dict)
+            and job.options.get("billing_debited")
+            and job.options.get("debited_credits")
+            and not job.options.get("billing_refunded")
+        ):
+            refund_credits(db, user_id=job.user_id, amount=int(job.options["debited_credits"]), job_id=job.id, reason="automatic refund after RunPod webhook failure")
+            job.options = {**job.options, "billing_refunded": True}
         job.status = JobStatus.failed
         job.error = str(payload.get("error") or (output.get("error") if isinstance(output, dict) else None) or payload)
     elif payload.get("status") == "COMPLETED":

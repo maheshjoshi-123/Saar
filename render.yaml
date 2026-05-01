@@ -23,6 +23,12 @@ services:
         generateValue: true
       - key: INTERNAL_CALLBACK_TOKEN
         generateValue: true
+      - key: BILLING_ENFORCED
+        value: "true"
+      - key: USER_AUTH_ENFORCED
+        value: "true"
+      - key: USER_AUTH_SECRET
+        generateValue: true
       - key: FRONTEND_URL
         sync: false
       - key: RUNPOD_API_KEY
@@ -60,11 +66,23 @@ services:
         value: production
       - key: WORKFLOW_DIR
         value: /app/workflows
+      - key: INTERNAL_CALLBACK_TOKEN
+        sync: false
       - key: DATABASE_URL
         sync: false
       - key: REDIS_URL
         sync: false
       - key: RUNPOD_API_KEY
+        sync: false
+      - key: RUNPOD_WAN_T2V_ENDPOINT_ID
+        sync: false
+      - key: RUNPOD_WAN_I2V_ENDPOINT_ID
+        sync: false
+      - key: RUNPOD_LTX_PREVIEW_ENDPOINT_ID
+        sync: false
+      - key: RUNPOD_HUNYUAN_ENDPOINT_ID
+        sync: false
+      - key: RUNPOD_UPSCALE_ENDPOINT_ID
         sync: false
       - key: R2_ACCOUNT_ID
         sync: false
@@ -89,4 +107,8 @@ services:
       - key: SAAR_API_URL
         sync: false
       - key: SAAR_API_TOKEN
+        sync: false
+      - key: SAAR_ADMIN_TOKEN
+        sync: false
+      - key: SAAR_ADMIN_UI_KEY
         sync: false

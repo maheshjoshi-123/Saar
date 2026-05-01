@@ -2,7 +2,7 @@ from datetime import datetime
 from math import ceil
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from .models import Coupon, CreditLedger, CreditWallet, LedgerType, PricingPlan, TaskType
+from .models import Coupon, CouponRedemption, CreditLedger, CreditWallet, LedgerType, PricingPlan, TaskType
 
 
 DEFAULT_PLANS = [
@@ -71,6 +71,15 @@ def get_wallet(db: Session, user_id: str, create: bool = True) -> CreditWallet |
     return wallet
 
 
+def _locked_wallet(db: Session, user_id: str) -> CreditWallet:
+    wallet = db.execute(select(CreditWallet).where(CreditWallet.user_id == user_id).with_for_update()).scalars().first()
+    if not wallet:
+        wallet = CreditWallet(user_id=user_id, balance=0, lifetime_credits=0, lifetime_spent=0)
+        db.add(wallet)
+        db.flush()
+    return wallet
+
+
 def estimate_generation_cost(task_type: TaskType, *, duration_seconds: int = 6, quality: str = "standard", complexity_score: int | None = None, model_key: str | None = None) -> dict:
     duration_seconds = max(1, min(duration_seconds, 60))
     complexity_score = complexity_score or 4
@@ -99,8 +108,7 @@ def estimate_generation_cost(task_type: TaskType, *, duration_seconds: int = 6, 
 
 
 def add_credits(db: Session, *, user_id: str, amount: int, reason: str, ledger_type: LedgerType = LedgerType.grant, meta: dict | None = None) -> CreditWallet:
-    wallet = get_wallet(db, user_id, create=True)
-    assert wallet is not None
+    wallet = _locked_wallet(db, user_id)
     wallet.balance += amount
     wallet.lifetime_credits += max(amount, 0)
     wallet.updated_at = datetime.utcnow()
@@ -111,8 +119,7 @@ def add_credits(db: Session, *, user_id: str, amount: int, reason: str, ledger_t
 
 
 def debit_credits(db: Session, *, user_id: str, amount: int, job_id: str, reason: str, meta: dict | None = None) -> CreditWallet:
-    wallet = get_wallet(db, user_id, create=True)
-    assert wallet is not None
+    wallet = _locked_wallet(db, user_id)
     if wallet.balance < amount:
         raise ValueError(f"Insufficient credits: required {amount}, available {wallet.balance}")
     wallet.balance -= amount
@@ -125,8 +132,7 @@ def debit_credits(db: Session, *, user_id: str, amount: int, job_id: str, reason
 
 
 def refund_credits(db: Session, *, user_id: str, amount: int, job_id: str, reason: str) -> CreditWallet:
-    wallet = get_wallet(db, user_id, create=True)
-    assert wallet is not None
+    wallet = _locked_wallet(db, user_id)
     wallet.balance += amount
     wallet.lifetime_spent = max(0, wallet.lifetime_spent - amount)
     wallet.updated_at = datetime.utcnow()
@@ -137,9 +143,12 @@ def refund_credits(db: Session, *, user_id: str, amount: int, job_id: str, reaso
 
 
 def redeem_coupon(db: Session, *, user_id: str, code: str, purchase_credits: int = 0) -> CreditWallet:
-    coupon = db.execute(select(Coupon).where(Coupon.code == code.strip().upper())).scalars().first()
+    coupon = db.execute(select(Coupon).where(Coupon.code == code.strip().upper()).with_for_update()).scalars().first()
     if not coupon or not coupon.is_active:
         raise ValueError("Invalid coupon")
+    existing_redemption = db.execute(select(CouponRedemption).where(CouponRedemption.coupon_id == coupon.id, CouponRedemption.user_id == user_id)).scalars().first()
+    if existing_redemption:
+        raise ValueError("Coupon already redeemed by this user")
     if coupon.expires_at and coupon.expires_at < datetime.utcnow():
         raise ValueError("Coupon expired")
     if coupon.max_redemptions is not None and coupon.redeemed_count >= coupon.max_redemptions:
@@ -149,11 +158,11 @@ def redeem_coupon(db: Session, *, user_id: str, code: str, purchase_credits: int
     if amount <= 0:
         raise ValueError("Coupon has no credit value")
     coupon.redeemed_count += 1
-    wallet = get_wallet(db, user_id, create=True)
-    assert wallet is not None
+    wallet = _locked_wallet(db, user_id)
     wallet.balance += amount
     wallet.lifetime_credits += amount
     wallet.updated_at = datetime.utcnow()
+    db.add(CouponRedemption(coupon_id=coupon.id, user_id=user_id, credit_amount=amount, purchase_credits=purchase_credits))
     db.add(CreditLedger(user_id=user_id, type=LedgerType.coupon, amount=amount, balance_after=wallet.balance, reason=f"coupon {coupon.code}", meta={"coupon_id": coupon.id, "purchase_credits": purchase_credits}))
     db.commit()
     db.refresh(wallet)

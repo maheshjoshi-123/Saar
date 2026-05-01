@@ -2,7 +2,7 @@
 
 Saar uses internal credits to protect GPU cost before a user starts a video generation. The goal is simple: estimate the job cost, compare it with the user's wallet balance, block the job when credits are insufficient, and keep a ledger of every grant, coupon, debit and refund.
 
-`user_id` is currently treated as an external identity key from your future auth system. This avoids blocking deployment on a full user-account system, but production should still add signed-in users and server-side authorization before public launch.
+`user_id` is treated as an external identity key. For production, set `USER_AUTH_ENFORCED=true` and issue each customer a signed user token. This prevents one user from typing another user's ID and viewing jobs, wallet balance, memory, prompt packets, or coupon redemptions.
 
 ## Core Flow
 
@@ -110,6 +110,38 @@ Users redeem coupons through:
 ```http
 POST /api/coupons/redeem
 ```
+
+Coupons can be limited by total redemption count and can only be redeemed once per user.
+
+## User Scope Security
+
+Enable per-user API scope:
+
+```env
+USER_AUTH_ENFORCED=true
+USER_AUTH_SECRET=long-random-secret
+```
+
+Issue a user token from the admin API:
+
+```http
+POST /api/admin/users/token
+```
+
+```json
+{
+  "user_id": "customer-123"
+}
+```
+
+The frontend/API client must send:
+
+```text
+X-Saar-User-Id: customer-123
+X-Saar-User-Token: <issued-token>
+```
+
+Protected user operations include wallets, ledgers, jobs, job events, prompt packets, assurance plans, memory, feedback, revisions, uploads, generation, estimates, and coupon redemption.
 
 The Next.js proxy only injects the backend admin token for `/api/admin/*` when the request includes the configured `SAAR_ADMIN_UI_KEY`. This is a temporary operational guard for the MVP dashboard. For real production, replace it with signed-in admin accounts and role-based authorization.
 

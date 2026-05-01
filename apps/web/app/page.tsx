@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { api, AssurancePlan, CostEstimate, Coupon, Job, PricingPlan, PromptVersion, QualityReport, TaskType, Wallet, uploadAsset } from "@/lib/api";
+import { api, AssurancePlan, CostEstimate, Coupon, Job, PricingPlan, PromptVersion, QualityReport, TaskType, userHeaders, Wallet, uploadAsset } from "@/lib/api";
 
 const TASKS: { value: TaskType; label: string; hint: string }[] = [
   { value: "text_to_video_quality", label: "Text to Video", hint: "Wan T2V quality generation" },
@@ -52,6 +52,7 @@ export default function Home() {
   const [location, setLocation] = useState("Kathmandu rooftop");
   const [taskType, setTaskType] = useState<TaskType>("text_to_video_quality");
   const [userId, setUserId] = useState("demo-user");
+  const [userToken, setUserToken] = useState("");
   const [couponCode, setCouponCode] = useState("SAAR100");
   const [adminKey, setAdminKey] = useState("");
   const [adminCouponCode, setAdminCouponCode] = useState("SAAR100");
@@ -65,8 +66,9 @@ export default function Home() {
   const [revisionText, setRevisionText] = useState("Make the camera movement slower and keep the cap logo stable");
 
   const jobs = useQuery({
-    queryKey: ["jobs"],
-    queryFn: () => api<Job[]>("/api/jobs"),
+    queryKey: ["jobs", userId, userToken],
+    queryFn: () => api<Job[]>(`/api/jobs?user_id=${encodeURIComponent(userId)}`, { headers: userHeaders(userId, userToken) }),
+    enabled: Boolean(userId),
     refetchInterval: 5000,
   });
 
@@ -76,8 +78,8 @@ export default function Home() {
   });
 
   const wallet = useQuery({
-    queryKey: ["wallet", userId],
-    queryFn: () => api<Wallet>(`/api/billing/wallet?user_id=${encodeURIComponent(userId)}`),
+    queryKey: ["wallet", userId, userToken],
+    queryFn: () => api<Wallet>(`/api/billing/wallet?user_id=${encodeURIComponent(userId)}`, { headers: userHeaders(userId, userToken) }),
     enabled: Boolean(userId),
   });
 
@@ -93,13 +95,14 @@ export default function Home() {
           complexity_score: 5,
           user_id: userId || null,
         }),
+        headers: userHeaders(userId, userToken),
       }),
     enabled: Boolean(userId),
   });
 
   const activeJob = useQuery({
-    queryKey: ["job", activeJobId],
-    queryFn: () => api<Job>(`/api/jobs/${activeJobId}`),
+    queryKey: ["job", activeJobId, userId, userToken],
+    queryFn: () => api<Job>(`/api/jobs/${activeJobId}?user_id=${encodeURIComponent(userId)}`, { headers: userHeaders(userId, userToken) }),
     enabled: Boolean(activeJobId),
     refetchInterval: (query) => {
       const status = query.state.data?.status;
@@ -108,8 +111,8 @@ export default function Home() {
   });
 
   const promptVersion = useQuery({
-    queryKey: ["prompt-version", activeJobId],
-    queryFn: () => api<PromptVersion>(`/api/jobs/${activeJobId}/prompt-version`),
+    queryKey: ["prompt-version", activeJobId, userId, userToken],
+    queryFn: () => api<PromptVersion>(`/api/jobs/${activeJobId}/prompt-version?user_id=${encodeURIComponent(userId)}`, { headers: userHeaders(userId, userToken) }),
     enabled: Boolean(activeJobId),
   });
 
@@ -117,6 +120,7 @@ export default function Home() {
     mutationFn: () =>
       api<AssurancePlan>("/api/assurance/intake", {
         method: "POST",
+        headers: userHeaders(userId, userToken),
         body: JSON.stringify({ raw_idea: idea, user_id: userId, style, mood, platform, pace, realism, audience, product, location, duration_seconds: 6 }),
       }),
     onSuccess: (nextPlan) => {
@@ -128,8 +132,9 @@ export default function Home() {
 
   const confirmPlan = useMutation({
     mutationFn: () =>
-      api<AssurancePlan>(`/api/assurance/${plan?.id}/confirm`, {
+      api<AssurancePlan>(`/api/assurance/${plan?.id}/confirm?user_id=${encodeURIComponent(userId)}`, {
         method: "POST",
+        headers: userHeaders(userId, userToken),
         body: JSON.stringify({ selected_concept_id: selectedConcept }),
       }),
     onSuccess: setPlan,
@@ -139,11 +144,12 @@ export default function Home() {
     mutationFn: async () => {
       let inputAssetId: string | undefined;
       if (file) {
-        inputAssetId = await uploadAsset(file, userId);
+        inputAssetId = await uploadAsset(file, userId, userToken);
       }
       const path = plan?.status === "confirmed" ? `/api/assurance/${plan.id}/jobs` : "/api/jobs";
       return api<Job>(path, {
         method: "POST",
+        headers: userHeaders(userId, userToken),
         body: JSON.stringify({
           prompt: idea,
           task_type: taskType,
@@ -175,6 +181,7 @@ export default function Home() {
     mutationFn: () =>
       api<Wallet>("/api/coupons/redeem", {
         method: "POST",
+        headers: userHeaders(userId, userToken),
         body: JSON.stringify({ user_id: userId, code: couponCode }),
       }),
     onSuccess: () => wallet.refetch(),
@@ -200,7 +207,7 @@ export default function Home() {
   });
 
   const generateQa = useMutation({
-    mutationFn: () => api<QualityReport>(`/api/jobs/${activeJobId}/quality-report`, { method: "POST" }),
+    mutationFn: () => api<QualityReport>(`/api/jobs/${activeJobId}/quality-report?user_id=${encodeURIComponent(userId)}`, { method: "POST", headers: userHeaders(userId, userToken) }),
     onSuccess: setQualityReport,
   });
 
@@ -208,7 +215,8 @@ export default function Home() {
     mutationFn: () =>
       api("/api/revisions", {
         method: "POST",
-        body: JSON.stringify({ job_id: activeJobId, type: "motion", target: { scope: "whole_video" }, instruction: revisionText }),
+        headers: userHeaders(userId, userToken),
+        body: JSON.stringify({ job_id: activeJobId, user_id: userId, type: "motion", target: { scope: "whole_video" }, instruction: revisionText }),
       }),
   });
 
@@ -216,8 +224,10 @@ export default function Home() {
     mutationFn: (approved: boolean) =>
       api("/api/feedback", {
         method: "POST",
+        headers: userHeaders(userId, userToken),
         body: JSON.stringify({
           job_id: activeJobId,
+          user_id: userId,
           approved,
           rating: approved ? 5 : 3,
           approved_patterns: approved ? ["confirmed concept direction", "stable product framing"] : [],
@@ -312,6 +322,10 @@ export default function Home() {
               <label className="block">
                 <span className="inline-flex items-center gap-2 text-sm font-medium"><User size={16} /> User ID</span>
                 <input value={userId} onChange={(e) => setUserId(e.target.value)} className="mt-2 w-full rounded-md border border-line px-3 py-2" />
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium">User access token</span>
+                <input type="password" value={userToken} onChange={(e) => setUserToken(e.target.value)} className="mt-2 w-full rounded-md border border-line px-3 py-2" />
               </label>
               <div className="grid gap-3 sm:grid-cols-3">
                 <Info label="Token balance" value={wallet.data ? `${wallet.data.balance} credits` : "loading"} />

@@ -78,6 +78,15 @@ class CreditGrantRequest(BaseModel):
     reason: str = "admin grant"
 
 
+class UserTokenRequest(BaseModel):
+    user_id: str
+
+
+class UserTokenResponse(BaseModel):
+    user_id: str
+    token: str
+
+
 class CouponIn(BaseModel):
     code: str
     description: str | None = None

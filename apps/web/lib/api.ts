@@ -150,9 +150,14 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function uploadAsset(file: File, userId?: string): Promise<string> {
+export function userHeaders(userId: string, userToken: string): HeadersInit {
+  return userId && userToken ? { "x-saar-user-id": userId, "x-saar-user-token": userToken } : {};
+}
+
+export async function uploadAsset(file: File, userId?: string, userToken?: string): Promise<string> {
   const presign = await api<{ asset_id: string; upload_url: string }>("/api/assets/presign-upload", {
     method: "POST",
+    headers: userHeaders(userId || "", userToken || ""),
     body: JSON.stringify({
       filename: file.name,
       content_type: file.type || "application/octet-stream",

@@ -17,7 +17,11 @@ def check_preflight(settings: Settings | None = None) -> dict:
 
     add("secret_key", settings.secret_key not in {"", "change-me"}, "SECRET_KEY must be unique in production")
     add("callback_token", settings.internal_callback_token not in {"", "change-me-too"}, "INTERNAL_CALLBACK_TOKEN must be unique in production")
-    add("admin_auth", bool(settings.admin_auth_token or settings.api_auth_token), "Set ADMIN_AUTH_TOKEN or API_AUTH_TOKEN")
+    add("api_auth", bool(settings.api_auth_token), "Set API_AUTH_TOKEN")
+    add("admin_auth", bool(settings.admin_auth_token), "Set ADMIN_AUTH_TOKEN")
+    add("auth_separation", bool(settings.admin_auth_token and settings.api_auth_token and settings.admin_auth_token != settings.api_auth_token), "ADMIN_AUTH_TOKEN and API_AUTH_TOKEN must be different")
+    add("user_auth", (not settings.user_auth_enforced) or bool(settings.user_auth_secret), "Set USER_AUTH_SECRET when USER_AUTH_ENFORCED=true")
+    add("billing_guard", settings.billing_enforced, "Set BILLING_ENFORCED=true before taking paid users")
     add("runpod_auth", settings.runpod_mock or bool(settings.runpod_api_key), "Set RUNPOD_API_KEY or RUNPOD_MOCK=true")
 
     endpoint_values = []

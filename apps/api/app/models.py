@@ -254,6 +254,17 @@ class Coupon(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class CouponRedemption(Base):
+    __tablename__ = "coupon_redemptions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    coupon_id: Mapped[str] = mapped_column(String, ForeignKey("coupons.id"), index=True)
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    credit_amount: Mapped[int] = mapped_column(Integer)
+    purchase_credits: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class JobEvent(Base):
     __tablename__ = "job_events"
 
@@ -270,3 +281,4 @@ Index("idx_model_task_active", ModelEndpoint.task_type, ModelEndpoint.is_active)
 Index("idx_memory_scope", MemoryItem.user_id, MemoryItem.project_id, MemoryItem.type, MemoryItem.is_active)
 Index("idx_assurance_scope", AssurancePlan.user_id, AssurancePlan.project_id, AssurancePlan.status)
 Index("idx_ledger_user_created", CreditLedger.user_id, CreditLedger.created_at)
+Index("idx_coupon_redemption_once", CouponRedemption.coupon_id, CouponRedemption.user_id, unique=True)
