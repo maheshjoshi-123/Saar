@@ -38,6 +38,42 @@ def main() -> None:
         assert unauthorized.status_code == 401, unauthorized.text
 
         headers = {"Authorization": "Bearer smoke-api-token"}
+        admin_headers = {"Authorization": "Bearer smoke-admin-token"}
+
+        plans = client.get("/api/pricing/plans", headers=headers)
+        assert plans.status_code == 200, plans.text
+        assert len(plans.json()) >= 3, plans.text
+
+        estimate = client.post(
+            "/api/jobs/estimate",
+            headers=headers,
+            json={"user_id": "smoke-user", "task_type": "text_to_video_quality", "duration_seconds": 6, "quality": "standard", "complexity_score": 5},
+        )
+        assert estimate.status_code == 200, estimate.text
+        assert estimate.json()["required_credits"] > 0, estimate.text
+
+        grant = client.post(
+            "/api/admin/billing/grant",
+            headers=admin_headers,
+            json={"user_id": "smoke-user", "amount": 300, "reason": "smoke grant"},
+        )
+        assert grant.status_code == 200, grant.text
+        assert grant.json()["balance"] == 300, grant.text
+
+        coupon = client.post(
+            "/api/admin/coupons",
+            headers=admin_headers,
+            json={"code": "SMOKE50", "credit_amount": 50, "description": "smoke coupon", "max_redemptions": 1},
+        )
+        assert coupon.status_code == 200, coupon.text
+
+        redeemed = client.post(
+            "/api/coupons/redeem",
+            headers=headers,
+            json={"user_id": "smoke-user", "code": "SMOKE50"},
+        )
+        assert redeemed.status_code == 200, redeemed.text
+        assert redeemed.json()["balance"] == 350, redeemed.text
 
         memory = client.post(
             "/api/memory",
@@ -82,12 +118,14 @@ def main() -> None:
             json={
                 "prompt": "A premium Facebook Reel for a grey curved-brim cap on a Kathmandu rooftop, model adjusts the cap once",
                 "task_type": "text_to_video_quality",
+                "user_id": "smoke-user",
                 "options": {"poll_seconds": 0, "max_poll_attempts": 1, "assurance_plan_id": plan["id"], "subject_lock": {"object": "warm grey curved-brim cap", "logo_rule": "front centre embroidery must remain stable"}},
             },
         )
         assert created.status_code == 200, created.text
         job = created.json()
         assert job["status"] in {"completed", "submitted", "running", "queued"}, job
+        assert job["required_credits"] > 0, job
 
         fetched = client.get(f"/api/jobs/{job['id']}", headers=headers)
         assert fetched.status_code == 200, fetched.text

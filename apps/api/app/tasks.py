@@ -4,6 +4,7 @@ from celery import Celery
 from sqlalchemy import select
 from .config import get_settings
 from .db import SessionLocal
+from .billing import refund_credits
 from .models import Asset, AssetType, Job, JobEvent, JobStatus, PromptVersion
 from .router import resolve_endpoint
 from .runpod_client import RunPodClient
@@ -115,6 +116,24 @@ async def _process_job_async(job_id: str) -> None:
     except Exception as exc:
         job = db.get(Job, job_id)
         if job:
+            if (
+                job.user_id
+                and isinstance(job.options, dict)
+                and job.options.get("billing_debited")
+                and job.options.get("debited_credits")
+                and not job.options.get("billing_refunded")
+            ):
+                try:
+                    refund_credits(
+                        db,
+                        user_id=job.user_id,
+                        amount=int(job.options["debited_credits"]),
+                        job_id=job.id,
+                        reason="automatic refund after generation failure",
+                    )
+                    job.options = {**job.options, "billing_refunded": True}
+                except Exception as refund_exc:
+                    add_event(db, job.id, "refund_failed", str(refund_exc))
             job.status = JobStatus.failed
             job.error = str(exc)
             job.completed_at = datetime.utcnow()

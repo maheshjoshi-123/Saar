@@ -58,7 +58,16 @@ For the frontend:
 
 ```text
 NEXT_PUBLIC_API_URL
-NEXT_PUBLIC_API_TOKEN
+SAAR_API_URL
+SAAR_API_TOKEN
+SAAR_ADMIN_TOKEN
+SAAR_ADMIN_UI_KEY
+```
+
+For billing:
+
+```text
+BILLING_ENFORCED
 ```
 
 ## 4. Replace Workflow Placeholders
@@ -107,3 +116,17 @@ Then verify:
 - frontend video player loads the final URL
 - `/api/jobs/{id}/events` contains routing, submitted, status, and completed events
 
+## 7. Billing Readiness
+
+Before accepting paid users:
+
+- keep `BILLING_ENFORCED=false` for demos and internal testing
+- create or confirm pricing plans in `/api/pricing/plans`
+- set different values for `API_AUTH_TOKEN` and `ADMIN_AUTH_TOKEN`
+- set `SAAR_ADMIN_UI_KEY` if using the temporary dashboard admin controls
+- grant a test wallet enough credits using `/api/admin/billing/grant`
+- create and redeem one coupon using `/api/admin/coupons` and `/api/coupons/redeem`
+- set `BILLING_ENFORCED=true`
+- confirm an underfunded wallet receives `402 Insufficient credits`
+- confirm a failed debited job creates a `refund` ledger row
+- connect your real payment provider so successful purchases call the credit grant path

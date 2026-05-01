@@ -21,10 +21,54 @@ export type Job = {
   output_url?: string | null;
   complexity_score?: number | null;
   complexity_decision?: string | null;
+  required_credits?: number | null;
+  debited_credits?: number | null;
   error?: string | null;
   created_at: string;
   started_at?: string | null;
   completed_at?: string | null;
+};
+
+export type PricingPlan = {
+  id: string;
+  key: string;
+  name: string;
+  price_npr: number;
+  credits: number;
+  max_video_seconds: number;
+  max_jobs_per_month?: number | null;
+  features: string[];
+  is_active: boolean;
+  created_at: string;
+};
+
+export type Wallet = {
+  user_id: string;
+  balance: number;
+  lifetime_credits: number;
+  lifetime_spent: number;
+  updated_at: string;
+};
+
+export type CostEstimate = {
+  required_credits: number;
+  estimated_gpu_seconds: number;
+  price_breakdown: Record<string, unknown>;
+  user_balance?: number | null;
+  has_enough_credits?: boolean | null;
+};
+
+export type Coupon = {
+  id: string;
+  code: string;
+  description?: string | null;
+  credit_amount: number;
+  percent_bonus: number;
+  max_redemptions?: number | null;
+  redeemed_count: number;
+  expires_at?: string | null;
+  is_active: boolean;
+  created_at: string;
 };
 
 export type PromptVersion = {

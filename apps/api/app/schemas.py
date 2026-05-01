@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel, Field
-from .models import AssuranceStatus, AssetType, JobStatus, MemoryType, TaskType
+from .models import AssuranceStatus, AssetType, JobStatus, LedgerType, MemoryType, TaskType
 
 
 class PresignUploadRequest(BaseModel):
@@ -25,6 +25,95 @@ class CreateJobRequest(BaseModel):
     user_id: str | None = None
     model_key: str | None = None
     options: dict = Field(default_factory=dict)
+
+
+class CostEstimateRequest(BaseModel):
+    task_type: TaskType
+    model_key: str | None = None
+    duration_seconds: int = 6
+    quality: str = "standard"
+    complexity_score: int | None = None
+    user_id: str | None = None
+
+
+class CostEstimateResponse(BaseModel):
+    required_credits: int
+    estimated_gpu_seconds: int
+    price_breakdown: dict
+    user_balance: int | None = None
+    has_enough_credits: bool | None = None
+
+
+class PricingPlanIn(BaseModel):
+    key: str
+    name: str
+    price_npr: int = 0
+    credits: int
+    max_video_seconds: int = 6
+    max_jobs_per_month: int | None = None
+    features: list[str] = Field(default_factory=list)
+    is_active: bool = True
+
+
+class PricingPlanOut(PricingPlanIn):
+    id: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class WalletResponse(BaseModel):
+    user_id: str
+    balance: int
+    lifetime_credits: int
+    lifetime_spent: int
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class CreditGrantRequest(BaseModel):
+    user_id: str
+    amount: int = Field(gt=0)
+    reason: str = "admin grant"
+
+
+class CouponIn(BaseModel):
+    code: str
+    description: str | None = None
+    credit_amount: int = Field(ge=0)
+    percent_bonus: int = Field(default=0, ge=0, le=100)
+    max_redemptions: int | None = None
+    expires_at: datetime | None = None
+    is_active: bool = True
+
+
+class CouponOut(CouponIn):
+    id: str
+    redeemed_count: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class RedeemCouponRequest(BaseModel):
+    user_id: str
+    code: str
+    purchase_credits: int = 0
+
+
+class LedgerResponse(BaseModel):
+    id: str
+    user_id: str
+    job_id: str | None
+    type: LedgerType
+    amount: int
+    balance_after: int
+    reason: str
+    meta: dict
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 class DesireIntakeRequest(BaseModel):
@@ -161,6 +250,8 @@ class JobResponse(BaseModel):
     output_url: str | None
     complexity_score: int | None = None
     complexity_decision: str | None = None
+    required_credits: int | None = None
+    debited_credits: int | None = None
     error: str | None
     created_at: datetime
     started_at: datetime | None

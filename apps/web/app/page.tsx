@@ -3,9 +3,11 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  BadgePercent,
   CheckCircle2,
   ClipboardCheck,
   Clapperboard,
+  Coins,
   Gauge,
   ImagePlus,
   Layers3,
@@ -13,12 +15,14 @@ import {
   RefreshCw,
   ShieldCheck,
   Sparkles,
+  Ticket,
   UploadCloud,
+  User,
   WandSparkles,
 } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { api, AssurancePlan, Job, PromptVersion, QualityReport, TaskType, uploadAsset } from "@/lib/api";
+import { api, AssurancePlan, CostEstimate, Coupon, Job, PricingPlan, PromptVersion, QualityReport, TaskType, Wallet, uploadAsset } from "@/lib/api";
 
 const TASKS: { value: TaskType; label: string; hint: string }[] = [
   { value: "text_to_video_quality", label: "Text to Video", hint: "Wan T2V quality generation" },
@@ -47,6 +51,12 @@ export default function Home() {
   const [product, setProduct] = useState("warm grey curved-brim cap");
   const [location, setLocation] = useState("Kathmandu rooftop");
   const [taskType, setTaskType] = useState<TaskType>("text_to_video_quality");
+  const [userId, setUserId] = useState("demo-user");
+  const [couponCode, setCouponCode] = useState("SAAR100");
+  const [adminKey, setAdminKey] = useState("");
+  const [adminCouponCode, setAdminCouponCode] = useState("SAAR100");
+  const [adminCouponCredits, setAdminCouponCredits] = useState(100);
+  const [adminGrantAmount, setAdminGrantAmount] = useState(250);
   const [file, setFile] = useState<File | null>(null);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [plan, setPlan] = useState<AssurancePlan | null>(null);
@@ -58,6 +68,33 @@ export default function Home() {
     queryKey: ["jobs"],
     queryFn: () => api<Job[]>("/api/jobs"),
     refetchInterval: 5000,
+  });
+
+  const pricing = useQuery({
+    queryKey: ["pricing"],
+    queryFn: () => api<PricingPlan[]>("/api/pricing/plans"),
+  });
+
+  const wallet = useQuery({
+    queryKey: ["wallet", userId],
+    queryFn: () => api<Wallet>(`/api/billing/wallet?user_id=${encodeURIComponent(userId)}`),
+    enabled: Boolean(userId),
+  });
+
+  const estimate = useQuery({
+    queryKey: ["estimate", taskType, userId, plan?.confidence.expectation_match_score],
+    queryFn: () =>
+      api<CostEstimate>("/api/jobs/estimate", {
+        method: "POST",
+        body: JSON.stringify({
+          task_type: taskType,
+          duration_seconds: 6,
+          quality: taskType === "premium_quality" ? "premium" : taskType === "fast_preview" ? "preview" : "standard",
+          complexity_score: 5,
+          user_id: userId || null,
+        }),
+      }),
+    enabled: Boolean(userId),
   });
 
   const activeJob = useQuery({
@@ -80,7 +117,7 @@ export default function Home() {
     mutationFn: () =>
       api<AssurancePlan>("/api/assurance/intake", {
         method: "POST",
-        body: JSON.stringify({ raw_idea: idea, style, mood, platform, pace, realism, audience, product, location, duration_seconds: 6 }),
+        body: JSON.stringify({ raw_idea: idea, user_id: userId, style, mood, platform, pace, realism, audience, product, location, duration_seconds: 6 }),
       }),
     onSuccess: (nextPlan) => {
       setPlan(nextPlan);
@@ -102,7 +139,7 @@ export default function Home() {
     mutationFn: async () => {
       let inputAssetId: string | undefined;
       if (file) {
-        inputAssetId = await uploadAsset(file);
+        inputAssetId = await uploadAsset(file, userId);
       }
       const path = plan?.status === "confirmed" ? `/api/assurance/${plan.id}/jobs` : "/api/jobs";
       return api<Job>(path, {
@@ -110,6 +147,7 @@ export default function Home() {
         body: JSON.stringify({
           prompt: idea,
           task_type: taskType,
+          user_id: userId,
           input_asset_id: inputAssetId || null,
           options: {
             seed: -1,
@@ -128,7 +166,37 @@ export default function Home() {
       setActiveJobId(job.id);
       setQualityReport(null);
       jobs.refetch();
+      wallet.refetch();
+      estimate.refetch();
     },
+  });
+
+  const redeemCoupon = useMutation({
+    mutationFn: () =>
+      api<Wallet>("/api/coupons/redeem", {
+        method: "POST",
+        body: JSON.stringify({ user_id: userId, code: couponCode }),
+      }),
+    onSuccess: () => wallet.refetch(),
+  });
+
+  const grantCredits = useMutation({
+    mutationFn: () =>
+      api<Wallet>("/api/admin/billing/grant", {
+        method: "POST",
+        headers: { "x-saar-admin-key": adminKey },
+        body: JSON.stringify({ user_id: userId, amount: adminGrantAmount, reason: "admin dashboard grant" }),
+      }),
+    onSuccess: () => wallet.refetch(),
+  });
+
+  const createCoupon = useMutation({
+    mutationFn: () =>
+      api<Coupon>("/api/admin/coupons", {
+        method: "POST",
+        headers: { "x-saar-admin-key": adminKey },
+        body: JSON.stringify({ code: adminCouponCode, credit_amount: adminCouponCredits, description: "Admin generated discount credit coupon", max_redemptions: 100 }),
+      }),
   });
 
   const generateQa = useMutation({
@@ -160,7 +228,8 @@ export default function Home() {
 
   const selectedTask = useMemo(() => TASKS.find((item) => item.value === taskType), [taskType]);
   const fileRequired = taskType === "image_to_video" || taskType === "video_upscale";
-  const canGenerate = Boolean(idea) && (!fileRequired || Boolean(file)) && !createJob.isPending;
+  const hasEnoughCredits = estimate.data?.has_enough_credits !== false;
+  const canGenerate = Boolean(idea) && Boolean(userId) && hasEnoughCredits && (!fileRequired || Boolean(file)) && !createJob.isPending;
   const currentJob = activeJob.data;
 
   function onAssuranceSubmit(event: FormEvent) {
@@ -236,6 +305,73 @@ export default function Home() {
               </button>
               {createPlan.error ? <ErrorText error={createPlan.error} /> : null}
             </form>
+          </WorkflowCard>
+
+          <WorkflowCard step="Billing" title="Tokens, Pricing and Coupons" icon={<Coins className="text-teal" />}>
+            <div className="space-y-4">
+              <label className="block">
+                <span className="inline-flex items-center gap-2 text-sm font-medium"><User size={16} /> User ID</span>
+                <input value={userId} onChange={(e) => setUserId(e.target.value)} className="mt-2 w-full rounded-md border border-line px-3 py-2" />
+              </label>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Info label="Token balance" value={wallet.data ? `${wallet.data.balance} credits` : "loading"} />
+                <Info label="This generation" value={estimate.data ? `${estimate.data.required_credits} credits` : "pending"} />
+                <Info label="GPU estimate" value={estimate.data ? `${estimate.data.estimated_gpu_seconds}s` : "pending"} />
+              </div>
+              {estimate.data?.has_enough_credits === false ? (
+                <p className="rounded-md bg-red-50 p-3 text-sm text-red-800">
+                  Not enough credits. Required {estimate.data.required_credits}, available {estimate.data.user_balance ?? 0}.
+                </p>
+              ) : (
+                <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-800">This user has enough tokens for the selected generation type.</p>
+              )}
+              <div className="grid gap-3 sm:grid-cols-3">
+                {(pricing.data || []).map((item) => (
+                  <div key={item.id} className="rounded-md border border-line p-3">
+                    <p className="font-semibold">{item.name}</p>
+                    <p className="mt-1 text-sm text-slate-600">NPR {item.price_npr.toLocaleString()} / {item.credits} credits</p>
+                    <p className="mt-1 text-xs text-slate-500">Up to {item.max_video_seconds}s videos</p>
+                  </div>
+                ))}
+              </div>
+              <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                <input value={couponCode} onChange={(e) => setCouponCode(e.target.value)} className="rounded-md border border-line px-3 py-2 text-sm" />
+                <button onClick={() => redeemCoupon.mutate()} disabled={!couponCode || redeemCoupon.isPending} className="inline-flex items-center justify-center gap-2 rounded-md border border-line px-3 py-2 text-sm disabled:opacity-50">
+                  <Ticket size={16} /> Redeem
+                </button>
+              </div>
+              {redeemCoupon.error ? <ErrorText error={redeemCoupon.error} /> : null}
+              <details className="rounded-md border border-line bg-mist p-3">
+                <summary className="cursor-pointer text-sm font-medium">Admin pricing controls</summary>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label className="block sm:col-span-2">
+                    <span className="text-xs font-medium">Admin UI key</span>
+                    <input type="password" value={adminKey} onChange={(e) => setAdminKey(e.target.value)} className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm" />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-medium">Grant credits</span>
+                    <input type="number" value={adminGrantAmount} onChange={(e) => setAdminGrantAmount(Number(e.target.value))} className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm" />
+                  </label>
+                  <button onClick={() => grantCredits.mutate()} disabled={grantCredits.isPending || !userId} className="inline-flex items-end justify-center gap-2 rounded-md bg-ink px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
+                    <Coins size={16} /> Grant
+                  </button>
+                  <label className="block">
+                    <span className="text-xs font-medium">Coupon code</span>
+                    <input value={adminCouponCode} onChange={(e) => setAdminCouponCode(e.target.value)} className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm" />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-medium">Coupon credits</span>
+                    <input type="number" value={adminCouponCredits} onChange={(e) => setAdminCouponCredits(Number(e.target.value))} className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm" />
+                  </label>
+                  <button onClick={() => createCoupon.mutate()} disabled={createCoupon.isPending || !adminCouponCode} className="inline-flex items-center justify-center gap-2 rounded-md border border-line px-3 py-2 text-sm disabled:opacity-50 sm:col-span-2">
+                    <BadgePercent size={16} /> Create or update coupon
+                  </button>
+                </div>
+                {grantCredits.error ? <ErrorText error={grantCredits.error} /> : null}
+                {createCoupon.error ? <ErrorText error={createCoupon.error} /> : null}
+                {createCoupon.data ? <p className="mt-3 rounded-md bg-emerald-50 p-2 text-sm text-emerald-800">Coupon {createCoupon.data.code} is active.</p> : null}
+              </details>
+            </div>
           </WorkflowCard>
 
           <WorkflowCard step="4" title="Controlled Generation" icon={<Play className="text-teal" />}>
@@ -394,6 +530,8 @@ function JobDetail({
         <Info label="Task" value={job.task_type} />
         <Info label="Model" value={job.model_key || "auto"} />
         <Info label="Complexity" value={job.complexity_score != null ? `${job.complexity_score} / ${job.complexity_decision}` : "pending"} />
+        <Info label="Required credits" value={job.required_credits != null ? `${job.required_credits}` : "pending"} />
+        <Info label="Debited credits" value={job.debited_credits != null ? `${job.debited_credits}` : "not debited"} />
       </dl>
       {job.error ? <p className="rounded-md bg-red-50 p-3 text-sm text-red-800">{job.error}</p> : null}
       {job.output_url ? (

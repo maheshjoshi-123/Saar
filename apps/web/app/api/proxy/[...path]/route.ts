@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 const API_URL = process.env.SAAR_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const API_TOKEN = process.env.SAAR_API_TOKEN || "";
+const ADMIN_TOKEN = process.env.SAAR_ADMIN_TOKEN || API_TOKEN;
+const ADMIN_UI_KEY = process.env.SAAR_ADMIN_UI_KEY || "";
 
 type RouteContext = {
   params: Promise<{ path: string[] }>;
@@ -16,8 +18,11 @@ async function proxy(request: NextRequest, context: RouteContext) {
 
   const headers = new Headers(request.headers);
   headers.delete("host");
-  if (API_TOKEN) {
-    headers.set("authorization", `Bearer ${API_TOKEN}`);
+  const isAdminPath = backendPath.startsWith("/api/admin");
+  const suppliedAdminKey = request.headers.get("x-saar-admin-key") || "";
+  const token = isAdminPath && ADMIN_UI_KEY && suppliedAdminKey === ADMIN_UI_KEY ? ADMIN_TOKEN : API_TOKEN;
+  if (token) {
+    headers.set("authorization", `Bearer ${token}`);
   }
 
   const method = request.method.toUpperCase();

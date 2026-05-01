@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     admin_auth_token: str = Field(default="", alias="ADMIN_AUTH_TOKEN")
     internal_callback_token: str = Field(default="change-me-too", alias="INTERNAL_CALLBACK_TOKEN")
     auto_create_tables: bool = Field(default=True, alias="AUTO_CREATE_TABLES")
+    billing_enforced: bool = Field(default=False, alias="BILLING_ENFORCED")
 
     database_url: str = Field(default="postgresql+psycopg://postgres:postgres@localhost:5432/saar", alias="DATABASE_URL")
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")

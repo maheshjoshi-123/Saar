@@ -51,6 +51,14 @@ class MemoryType(str, enum.Enum):
     subject = "subject"
 
 
+class LedgerType(str, enum.Enum):
+    grant = "grant"
+    debit = "debit"
+    refund = "refund"
+    coupon = "coupon"
+    adjustment = "adjustment"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -65,7 +73,7 @@ class Asset(Base):
     __tablename__ = "assets"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     type: Mapped[AssetType] = mapped_column(Enum(AssetType))
     r2_key: Mapped[str] = mapped_column(String, index=True)
     public_url: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -95,7 +103,7 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     task_type: Mapped[TaskType] = mapped_column(Enum(TaskType), index=True)
     status: Mapped[JobStatus] = mapped_column(Enum(JobStatus), default=JobStatus.queued, index=True)
     prompt: Mapped[str] = mapped_column(Text)
@@ -121,7 +129,7 @@ class MemoryItem(Base):
     __tablename__ = "memory_items"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True, index=True)
+    user_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     project_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     type: Mapped[MemoryType] = mapped_column(Enum(MemoryType), index=True)
     priority: Mapped[int] = mapped_column(Integer, default=100, index=True)
@@ -152,7 +160,7 @@ class AssurancePlan(Base):
     __tablename__ = "assurance_plans"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True, index=True)
+    user_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     project_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     raw_idea: Mapped[str] = mapped_column(Text)
     structured_intake: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -182,11 +190,67 @@ class RevisionRequest(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     job_id: Mapped[str] = mapped_column(String, ForeignKey("jobs.id"), index=True)
-    user_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(String, nullable=True)
     type: Mapped[str] = mapped_column(String, index=True)
     target: Mapped[dict] = mapped_column(JSON, default=dict)
     instruction: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String, default="open", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class PricingPlan(Base):
+    __tablename__ = "pricing_plans"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    key: Mapped[str] = mapped_column(String, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String)
+    price_npr: Mapped[int] = mapped_column(Integer, default=0)
+    credits: Mapped[int] = mapped_column(Integer, default=0)
+    max_video_seconds: Mapped[int] = mapped_column(Integer, default=6)
+    max_jobs_per_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    features: Mapped[list] = mapped_column(JSON, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CreditWallet(Base):
+    __tablename__ = "credit_wallets"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String, index=True, unique=True)
+    balance: Mapped[int] = mapped_column(Integer, default=0)
+    lifetime_credits: Mapped[int] = mapped_column(Integer, default=0)
+    lifetime_spent: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CreditLedger(Base):
+    __tablename__ = "credit_ledger"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    job_id: Mapped[str | None] = mapped_column(String, ForeignKey("jobs.id"), nullable=True, index=True)
+    type: Mapped[LedgerType] = mapped_column(Enum(LedgerType), index=True)
+    amount: Mapped[int] = mapped_column(Integer)
+    balance_after: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(Text)
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class Coupon(Base):
+    __tablename__ = "coupons"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    code: Mapped[str] = mapped_column(String, unique=True, index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    credit_amount: Mapped[int] = mapped_column(Integer, default=0)
+    percent_bonus: Mapped[int] = mapped_column(Integer, default=0)
+    max_redemptions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    redeemed_count: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -205,3 +269,4 @@ Index("idx_jobs_status_created", Job.status, Job.created_at)
 Index("idx_model_task_active", ModelEndpoint.task_type, ModelEndpoint.is_active)
 Index("idx_memory_scope", MemoryItem.user_id, MemoryItem.project_id, MemoryItem.type, MemoryItem.is_active)
 Index("idx_assurance_scope", AssurancePlan.user_id, AssurancePlan.project_id, AssurancePlan.status)
+Index("idx_ledger_user_created", CreditLedger.user_id, CreditLedger.created_at)

@@ -182,3 +182,9 @@ See [docs/GENERATION_INTELLIGENCE.md](docs/GENERATION_INTELLIGENCE.md).
 Saar also includes an assurance workflow for expectation alignment before generation: structured desire extraction, concept options, confirmation, QA reports, precision revisions, and learning memory.
 
 See [docs/ASSURANCE_PIPELINE.md](docs/ASSURANCE_PIPELINE.md).
+
+## Billing and Tokens
+
+Saar includes credit wallets, pricing plans, job cost estimation, admin credit grants, discount coupons, redemption, ledger history, and automatic refunds when a debited generation fails. Set `BILLING_ENFORCED=true` when you want the API to block video generation if the user does not have enough credits.
+
+See [docs/BILLING_AND_TOKENS.md](docs/BILLING_AND_TOKENS.md).

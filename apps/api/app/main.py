@@ -9,12 +9,13 @@ from sqlalchemy.orm import Session
 from .config import get_settings
 from .db import get_db, init_db
 from .assurance import build_options_from_assurance, confirm_assurance_plan, create_assurance_plan, create_quality_report, create_revision_request, store_feedback_memory
+from .billing import add_credits, debit_credits, estimate_generation_cost, get_wallet, redeem_coupon, seed_default_plans
 from .context_compiler import compile_generation_context
-from .models import AssurancePlan, AssuranceStatus, Asset, AssetType, Job, JobEvent, JobStatus, MemoryItem, ModelEndpoint, PromptVersion, QualityReport, RevisionRequest, TaskType
+from .models import AssurancePlan, AssuranceStatus, Asset, AssetType, Coupon, CreditLedger, CreditWallet, Job, JobEvent, JobStatus, LedgerType, MemoryItem, ModelEndpoint, PricingPlan, PromptVersion, QualityReport, RevisionRequest, TaskType
 from .preflight import check_preflight
 from .r2 import presign_put, public_url_for_key
 from .router import resolve_endpoint
-from .schemas import AssurancePlanResponse, ConfirmAssuranceRequest, CreateJobRequest, DesireIntakeRequest, FeedbackIn, JobEventResponse, JobResponse, MemoryItemIn, MemoryItemOut, ModelEndpointIn, ModelEndpointOut, PresignUploadRequest, PresignUploadResponse, PromptVersionResponse, QualityReportResponse, RevisionRequestIn, RevisionRequestOut
+from .schemas import AssurancePlanResponse, ConfirmAssuranceRequest, CostEstimateRequest, CostEstimateResponse, CouponIn, CouponOut, CreditGrantRequest, CreateJobRequest, DesireIntakeRequest, FeedbackIn, JobEventResponse, JobResponse, LedgerResponse, MemoryItemIn, MemoryItemOut, ModelEndpointIn, ModelEndpointOut, PresignUploadRequest, PresignUploadResponse, PricingPlanIn, PricingPlanOut, PromptVersionResponse, QualityReportResponse, RedeemCouponRequest, RevisionRequestIn, RevisionRequestOut, WalletResponse
 from .security import require_admin_token, require_api_token
 from .tasks import process_job
 
@@ -26,6 +27,12 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     if settings.auto_create_tables:
         init_db()
+        from .db import SessionLocal
+        db = SessionLocal()
+        try:
+            seed_default_plans(db)
+        finally:
+            db.close()
     yield
 
 
@@ -38,6 +45,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _duration_from_options(options: dict) -> int:
+    raw = options.get("duration_seconds") or options.get("duration") or 6
+    if isinstance(raw, str):
+        digits = "".join(ch for ch in raw if ch.isdigit())
+        raw = digits or 6
+    try:
+        return max(1, min(int(raw), 60))
+    except (TypeError, ValueError):
+        return 6
 
 
 @app.get("/health")
@@ -102,6 +120,17 @@ def create_job(body: CreateJobRequest, db: Session = Depends(get_db)) -> JobResp
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Prompt compilation failed: {exc}") from exc
 
+    duration_seconds = _duration_from_options(body.options)
+    quality = body.options.get("quality") or ("premium" if body.task_type == TaskType.premium_quality else "standard")
+    estimate = estimate_generation_cost(body.task_type, duration_seconds=duration_seconds, quality=quality, complexity_score=compiled.complexity_score, model_key=endpoint.key)
+    if settings.billing_enforced:
+        if not body.user_id:
+            raise HTTPException(status_code=400, detail="user_id is required when billing is enforced")
+        wallet = get_wallet(db, body.user_id, create=True)
+        if not wallet or wallet.balance < estimate["required_credits"]:
+            available = wallet.balance if wallet else 0
+            raise HTTPException(status_code=402, detail=f"Insufficient credits: required {estimate['required_credits']}, available {available}")
+
     job = Job(
         user_id=body.user_id,
         task_type=body.task_type,
@@ -110,7 +139,7 @@ def create_job(body: CreateJobRequest, db: Session = Depends(get_db)) -> JobResp
         input_asset_id=body.input_asset_id,
         model_key=endpoint.key,
         runpod_endpoint_id=endpoint.endpoint_id,
-        options={**body.options, "compiled": True, "complexity_score": compiled.complexity_score, "complexity_decision": compiled.complexity_decision},
+        options={**body.options, "compiled": True, "complexity_score": compiled.complexity_score, "complexity_decision": compiled.complexity_decision, "required_credits": estimate["required_credits"], "estimated_gpu_seconds": estimate["estimated_gpu_seconds"], "billing_debited": False},
     )
     db.add(job)
     db.commit()
@@ -129,6 +158,16 @@ def create_job(body: CreateJobRequest, db: Session = Depends(get_db)) -> JobResp
     )
     db.add(prompt_version)
     db.commit()
+    if settings.billing_enforced and body.user_id:
+        try:
+            debit_credits(db, user_id=body.user_id, amount=estimate["required_credits"], job_id=job.id, reason="video generation reservation", meta=estimate["price_breakdown"])
+            job.options = {**job.options, "billing_debited": True, "debited_credits": estimate["required_credits"]}
+            db.commit()
+        except ValueError as exc:
+            job.status = JobStatus.failed
+            job.error = str(exc)
+            db.commit()
+            raise HTTPException(status_code=402, detail=str(exc)) from exc
     try:
         if settings.queue_mode == "inline":
             process_job.apply(args=[job.id])
@@ -145,6 +184,17 @@ def create_job(body: CreateJobRequest, db: Session = Depends(get_db)) -> JobResp
 @app.post("/api/assurance/intake", response_model=AssurancePlanResponse, dependencies=[Depends(require_api_token)])
 def assurance_intake(body: DesireIntakeRequest, db: Session = Depends(get_db)) -> AssurancePlan:
     return create_assurance_plan(db, body)
+
+
+@app.post("/api/jobs/estimate", response_model=CostEstimateResponse, dependencies=[Depends(require_api_token)])
+def estimate_job_cost(body: CostEstimateRequest, db: Session = Depends(get_db)) -> CostEstimateResponse:
+    estimate = estimate_generation_cost(body.task_type, duration_seconds=body.duration_seconds, quality=body.quality, complexity_score=body.complexity_score, model_key=body.model_key)
+    wallet = get_wallet(db, body.user_id, create=True) if body.user_id else None
+    return CostEstimateResponse(
+        **estimate,
+        user_balance=wallet.balance if wallet else None,
+        has_enough_credits=(wallet.balance >= estimate["required_credits"]) if wallet else None,
+    )
 
 
 @app.post("/api/assurance/{plan_id}/confirm", response_model=AssurancePlanResponse, dependencies=[Depends(require_api_token)])
@@ -209,6 +259,78 @@ def submit_feedback(body: FeedbackIn, db: Session = Depends(get_db)) -> list[Mem
     if not db.get(Job, body.job_id):
         raise HTTPException(status_code=404, detail="Job not found")
     return store_feedback_memory(db, body)
+
+
+@app.get("/api/pricing/plans", response_model=list[PricingPlanOut], dependencies=[Depends(require_api_token)])
+def list_pricing_plans(db: Session = Depends(get_db)) -> list[PricingPlan]:
+    return list(db.execute(select(PricingPlan).where(PricingPlan.is_active.is_(True)).order_by(PricingPlan.price_npr.asc())).scalars().all())
+
+
+@app.post("/api/admin/pricing/plans", response_model=PricingPlanOut, dependencies=[Depends(require_admin_token)])
+def upsert_pricing_plan(body: PricingPlanIn, db: Session = Depends(get_db)) -> PricingPlan:
+    plan = db.execute(select(PricingPlan).where(PricingPlan.key == body.key)).scalars().first()
+    if not plan:
+        plan = PricingPlan(key=body.key, name=body.name, credits=body.credits)
+        db.add(plan)
+    plan.name = body.name
+    plan.price_npr = body.price_npr
+    plan.credits = body.credits
+    plan.max_video_seconds = body.max_video_seconds
+    plan.max_jobs_per_month = body.max_jobs_per_month
+    plan.features = body.features
+    plan.is_active = body.is_active
+    db.commit()
+    db.refresh(plan)
+    return plan
+
+
+@app.get("/api/billing/wallet", response_model=WalletResponse, dependencies=[Depends(require_api_token)])
+def get_billing_wallet(user_id: str, db: Session = Depends(get_db)) -> CreditWallet:
+    wallet = get_wallet(db, user_id, create=True)
+    assert wallet is not None
+    return wallet
+
+
+@app.get("/api/billing/ledger", response_model=list[LedgerResponse], dependencies=[Depends(require_api_token)])
+def get_billing_ledger(user_id: str, db: Session = Depends(get_db)) -> list[CreditLedger]:
+    return list(db.execute(select(CreditLedger).where(CreditLedger.user_id == user_id).order_by(CreditLedger.created_at.desc()).limit(100)).scalars().all())
+
+
+@app.post("/api/admin/billing/grant", response_model=WalletResponse, dependencies=[Depends(require_admin_token)])
+def admin_grant_credits(body: CreditGrantRequest, db: Session = Depends(get_db)) -> CreditWallet:
+    return add_credits(db, user_id=body.user_id, amount=body.amount, reason=body.reason, ledger_type=LedgerType.grant)
+
+
+@app.post("/api/admin/coupons", response_model=CouponOut, dependencies=[Depends(require_admin_token)])
+def admin_create_coupon(body: CouponIn, db: Session = Depends(get_db)) -> Coupon:
+    existing = db.execute(select(Coupon).where(Coupon.code == body.code.strip().upper())).scalars().first()
+    if existing:
+        coupon = existing
+    else:
+        coupon = Coupon(code=body.code.strip().upper())
+        db.add(coupon)
+    coupon.description = body.description
+    coupon.credit_amount = body.credit_amount
+    coupon.percent_bonus = body.percent_bonus
+    coupon.max_redemptions = body.max_redemptions
+    coupon.expires_at = body.expires_at
+    coupon.is_active = body.is_active
+    db.commit()
+    db.refresh(coupon)
+    return coupon
+
+
+@app.get("/api/admin/coupons", response_model=list[CouponOut], dependencies=[Depends(require_admin_token)])
+def admin_list_coupons(db: Session = Depends(get_db)) -> list[Coupon]:
+    return list(db.execute(select(Coupon).order_by(Coupon.created_at.desc()).limit(100)).scalars().all())
+
+
+@app.post("/api/coupons/redeem", response_model=WalletResponse, dependencies=[Depends(require_api_token)])
+def redeem_coupon_endpoint(body: RedeemCouponRequest, db: Session = Depends(get_db)) -> CreditWallet:
+    try:
+        return redeem_coupon(db, user_id=body.user_id, code=body.code, purchase_credits=body.purchase_credits)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/jobs/{job_id}/prompt-version", response_model=PromptVersionResponse, dependencies=[Depends(require_api_token)])
@@ -308,6 +430,8 @@ def to_job_response(job: Job) -> JobResponse:
         output_url=output_url,
         complexity_score=job.options.get("complexity_score") if isinstance(job.options, dict) else None,
         complexity_decision=job.options.get("complexity_decision") if isinstance(job.options, dict) else None,
+        required_credits=job.options.get("required_credits") if isinstance(job.options, dict) else None,
+        debited_credits=job.options.get("debited_credits") if isinstance(job.options, dict) else None,
         error=job.error,
         created_at=job.created_at,
         started_at=job.started_at,
