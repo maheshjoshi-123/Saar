@@ -9,7 +9,9 @@ type RouteContext = {
 
 async function proxy(request: NextRequest, context: RouteContext) {
   const { path } = await context.params;
-  const target = new URL(`/api/${path.join("/")}`, API_URL);
+  const joined = path.join("/");
+  const backendPath = joined.startsWith("api/") ? `/${joined}` : `/api/${joined}`;
+  const target = new URL(backendPath, API_URL);
   request.nextUrl.searchParams.forEach((value, key) => target.searchParams.set(key, value));
 
   const headers = new Headers(request.headers);

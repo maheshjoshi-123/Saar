@@ -42,6 +42,55 @@ export type PromptVersion = {
   created_at: string;
 };
 
+export type AssurancePlan = {
+  id: string;
+  user_id?: string | null;
+  project_id?: string | null;
+  raw_idea: string;
+  structured_intake: Record<string, unknown>;
+  expectation_summary: { you_want?: string[]; must_confirm?: string[]; [key: string]: unknown };
+  concept_options: Array<{
+    id: string;
+    name: string;
+    style: string;
+    location: string;
+    lighting: string;
+    camera_motion: string;
+    description: string;
+  }>;
+  confidence: {
+    expectation_match_score?: number;
+    visual_risk?: string;
+    continuity_risk?: string;
+    recommendation?: string;
+  };
+  status: "draft" | "awaiting_confirmation" | "confirmed" | "preview_requested" | "final_ready" | "delivered" | "needs_revision";
+  selected_concept_id?: string | null;
+  confirmed_at?: string | null;
+  created_at: string;
+};
+
+export type QualityReport = {
+  id: string;
+  job_id: string;
+  technical_checks: Record<string, boolean>;
+  commercial_checks: Record<string, boolean>;
+  passed: boolean;
+  recommendations: string[];
+  created_at: string;
+};
+
+export type RevisionRequest = {
+  id: string;
+  job_id: string;
+  user_id?: string | null;
+  type: string;
+  target: Record<string, unknown>;
+  instruction: string;
+  status: string;
+  created_at: string;
+};
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     ...init,

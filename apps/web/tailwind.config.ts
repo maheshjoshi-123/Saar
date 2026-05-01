@@ -9,6 +9,7 @@ const config: Config = {
         mist: "#f5f7fb",
         line: "#d9e2ef",
         teal: "#0d7a6b",
+        tealL: "#e0f2ef",
         saffron: "#bd7a13"
       }
     },
@@ -17,4 +18,3 @@ const config: Config = {
 };
 
 export default config;
-
