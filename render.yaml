@@ -1,0 +1,92 @@
+services:
+  - type: web
+    name: saar-api
+    runtime: docker
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: SAAR_ENV
+        value: production
+      - key: WORKFLOW_DIR
+        value: /app/workflows
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: API_AUTH_TOKEN
+        generateValue: true
+      - key: ADMIN_AUTH_TOKEN
+        generateValue: true
+      - key: INTERNAL_CALLBACK_TOKEN
+        generateValue: true
+      - key: FRONTEND_URL
+        sync: false
+      - key: RUNPOD_API_KEY
+        sync: false
+      - key: RUNPOD_WAN_T2V_ENDPOINT_ID
+        sync: false
+      - key: RUNPOD_WAN_I2V_ENDPOINT_ID
+        sync: false
+      - key: RUNPOD_LTX_PREVIEW_ENDPOINT_ID
+        sync: false
+      - key: RUNPOD_HUNYUAN_ENDPOINT_ID
+        sync: false
+      - key: RUNPOD_UPSCALE_ENDPOINT_ID
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: R2_PUBLIC_BASE_URL
+        sync: false
+
+  - type: worker
+    name: saar-gpu-queue-worker
+    runtime: docker
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: .
+    plan: starter
+    startCommand: celery -A apps.api.app.tasks:celery_app worker -Q gpu --loglevel=INFO --concurrency=1
+    envVars:
+      - key: SAAR_ENV
+        value: production
+      - key: WORKFLOW_DIR
+        value: /app/workflows
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: RUNPOD_API_KEY
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: R2_PUBLIC_BASE_URL
+        sync: false
+
+  - type: web
+    name: saar-web
+    runtime: docker
+    dockerfilePath: ./apps/web/Dockerfile
+    dockerContext: .
+    plan: starter
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        value: /api/proxy
+      - key: SAAR_API_URL
+        sync: false
+      - key: SAAR_API_TOKEN
+        sync: false

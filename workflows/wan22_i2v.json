@@ -1,0 +1,9 @@
+{
+  "_description": "Replace with ComfyUI API export for Wan 2.2 image-to-video. Reference uploaded image by filename.",
+  "inputs": {
+    "prompt": "{{prompt}}",
+    "input_image": "{{input_image_name}}",
+    "seed": "{{seed}}"
+  }
+}
+

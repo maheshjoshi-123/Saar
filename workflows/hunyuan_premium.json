@@ -1,0 +1,8 @@
+{
+  "_description": "Replace with ComfyUI API export for Hunyuan premium workflow.",
+  "inputs": {
+    "prompt": "{{prompt}}",
+    "seed": "{{seed}}"
+  }
+}
+

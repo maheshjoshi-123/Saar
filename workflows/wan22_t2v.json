@@ -1,0 +1,9 @@
+{
+  "_description": "Replace with ComfyUI API export for Wan 2.2 text-to-video.",
+  "inputs": {
+    "prompt": "{{prompt}}",
+    "negative_prompt": "{{negative_prompt}}",
+    "seed": "{{seed}}"
+  }
+}
+

@@ -1,0 +1,6 @@
+{
+  "_description": "Replace with ComfyUI API export for video upscale/interpolation workflow.",
+  "inputs": {
+    "input_video": "{{input_video_name}}"
+  }
+}
