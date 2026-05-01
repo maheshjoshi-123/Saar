@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel, Field
-from .models import AssetType, JobStatus, MemoryType, TaskType
+from .models import AssuranceStatus, AssetType, JobStatus, MemoryType, TaskType
 
 
 class PresignUploadRequest(BaseModel):
@@ -25,6 +25,81 @@ class CreateJobRequest(BaseModel):
     user_id: str | None = None
     model_key: str | None = None
     options: dict = Field(default_factory=dict)
+
+
+class DesireIntakeRequest(BaseModel):
+    raw_idea: str = Field(min_length=1)
+    user_id: str | None = None
+    project_id: str | None = None
+    style: str | None = None
+    mood: str | None = None
+    audience: str | None = None
+    platform: str | None = None
+    pace: str | None = None
+    realism: str | None = None
+    product: str | None = None
+    location: str | None = None
+    duration_seconds: int | None = None
+
+
+class AssurancePlanResponse(BaseModel):
+    id: str
+    user_id: str | None
+    project_id: str | None
+    raw_idea: str
+    structured_intake: dict
+    expectation_summary: dict
+    concept_options: list
+    confidence: dict
+    status: AssuranceStatus
+    selected_concept_id: str | None
+    confirmed_at: datetime | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ConfirmAssuranceRequest(BaseModel):
+    selected_concept_id: str | None = None
+    edits: dict = Field(default_factory=dict)
+
+
+class QualityReportResponse(BaseModel):
+    id: str
+    job_id: str
+    technical_checks: dict
+    commercial_checks: dict
+    passed: bool
+    recommendations: list
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class RevisionRequestIn(BaseModel):
+    job_id: str
+    user_id: str | None = None
+    type: str
+    target: dict = Field(default_factory=dict)
+    instruction: str = Field(min_length=1)
+
+
+class RevisionRequestOut(RevisionRequestIn):
+    id: str
+    status: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class FeedbackIn(BaseModel):
+    job_id: str
+    user_id: str | None = None
+    approved: bool
+    rating: int = Field(ge=1, le=5)
+    approved_patterns: list[str] = Field(default_factory=list)
+    rejected_patterns: list[str] = Field(default_factory=list)
+    notes: str | None = None
 
 
 class MemoryItemIn(BaseModel):

@@ -16,6 +16,16 @@ class JobStatus(str, enum.Enum):
     cancelled = "cancelled"
 
 
+class AssuranceStatus(str, enum.Enum):
+    draft = "draft"
+    awaiting_confirmation = "awaiting_confirmation"
+    confirmed = "confirmed"
+    preview_requested = "preview_requested"
+    final_ready = "final_ready"
+    delivered = "delivered"
+    needs_revision = "needs_revision"
+
+
 class TaskType(str, enum.Enum):
     text_to_video_quality = "text_to_video_quality"
     image_to_video = "image_to_video"
@@ -138,6 +148,48 @@ class PromptVersion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class AssurancePlan(Base):
+    __tablename__ = "assurance_plans"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True, index=True)
+    project_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    raw_idea: Mapped[str] = mapped_column(Text)
+    structured_intake: Mapped[dict] = mapped_column(JSON, default=dict)
+    expectation_summary: Mapped[dict] = mapped_column(JSON, default=dict)
+    concept_options: Mapped[list] = mapped_column(JSON, default=list)
+    confidence: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[AssuranceStatus] = mapped_column(Enum(AssuranceStatus), default=AssuranceStatus.awaiting_confirmation, index=True)
+    selected_concept_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class QualityReport(Base):
+    __tablename__ = "quality_reports"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    job_id: Mapped[str] = mapped_column(String, ForeignKey("jobs.id"), index=True)
+    technical_checks: Mapped[dict] = mapped_column(JSON, default=dict)
+    commercial_checks: Mapped[dict] = mapped_column(JSON, default=dict)
+    passed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    recommendations: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class RevisionRequest(Base):
+    __tablename__ = "revision_requests"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    job_id: Mapped[str] = mapped_column(String, ForeignKey("jobs.id"), index=True)
+    user_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True)
+    type: Mapped[str] = mapped_column(String, index=True)
+    target: Mapped[dict] = mapped_column(JSON, default=dict)
+    instruction: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String, default="open", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class JobEvent(Base):
     __tablename__ = "job_events"
 
@@ -152,3 +204,4 @@ class JobEvent(Base):
 Index("idx_jobs_status_created", Job.status, Job.created_at)
 Index("idx_model_task_active", ModelEndpoint.task_type, ModelEndpoint.is_active)
 Index("idx_memory_scope", MemoryItem.user_id, MemoryItem.project_id, MemoryItem.type, MemoryItem.is_active)
+Index("idx_assurance_scope", AssurancePlan.user_id, AssurancePlan.project_id, AssurancePlan.status)

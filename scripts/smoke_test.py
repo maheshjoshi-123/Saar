@@ -50,13 +50,39 @@ def main() -> None:
         )
         assert memory.status_code == 200, memory.text
 
+        intake = client.post(
+            "/api/assurance/intake",
+            headers=headers,
+            json={
+                "raw_idea": "A premium Facebook Reel for a grey curved-brim cap on a Kathmandu rooftop, model adjusts the cap once",
+                "style": "Luxury",
+                "mood": "Aspirational",
+                "platform": "Facebook Reel",
+                "audience": "young urban Nepalese consumers",
+                "pace": "Slow",
+                "realism": "Natural",
+                "product": "warm grey curved-brim cap",
+                "location": "Kathmandu rooftop",
+            },
+        )
+        assert intake.status_code == 200, intake.text
+        plan = intake.json()
+        assert plan["confidence"]["expectation_match_score"] >= 80, intake.text
+
+        confirm = client.post(
+            f"/api/assurance/{plan['id']}/confirm",
+            headers=headers,
+            json={"selected_concept_id": "urban-premium"},
+        )
+        assert confirm.status_code == 200, confirm.text
+
         created = client.post(
             "/api/jobs",
             headers=headers,
             json={
                 "prompt": "A premium Facebook Reel for a grey curved-brim cap on a Kathmandu rooftop, model adjusts the cap once",
                 "task_type": "text_to_video_quality",
-                "options": {"poll_seconds": 0, "max_poll_attempts": 1, "subject_lock": {"object": "warm grey curved-brim cap", "logo_rule": "front centre embroidery must remain stable"}},
+                "options": {"poll_seconds": 0, "max_poll_attempts": 1, "assurance_plan_id": plan["id"], "subject_lock": {"object": "warm grey curved-brim cap", "logo_rule": "front centre embroidery must remain stable"}},
             },
         )
         assert created.status_code == 200, created.text
@@ -76,6 +102,24 @@ def main() -> None:
         assert "subject_lock" in packet, prompt_version.text
         assert "continuity_rules" in packet, prompt_version.text
         assert "Do not allow hands" in " ".join(packet["negative_rules"]), prompt_version.text
+
+        qa = client.post(f"/api/jobs/{job['id']}/quality-report", headers=headers)
+        assert qa.status_code == 200, qa.text
+        assert "technical_checks" in qa.json(), qa.text
+
+        revision = client.post(
+            "/api/revisions",
+            headers=headers,
+            json={"job_id": job["id"], "type": "motion", "target": {"seconds": 3}, "instruction": "Make the camera movement slower"},
+        )
+        assert revision.status_code == 200, revision.text
+
+        feedback = client.post(
+            "/api/feedback",
+            headers=headers,
+            json={"job_id": job["id"], "approved": False, "rating": 3, "approved_patterns": ["muted palette"], "rejected_patterns": ["camera too fast"]},
+        )
+        assert feedback.status_code == 200, feedback.text
 
         invalid = client.post(
             "/api/jobs",

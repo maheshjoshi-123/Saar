@@ -176,3 +176,9 @@ See [docs/DEPLOYMENT_CHECKLIST.md](docs/DEPLOYMENT_CHECKLIST.md) for the full go
 Saar includes a Context Compiler for Video Generation. It converts a messy user idea into a structured generation packet with subject lock, shot grammar, continuity anchors, failure memory, complexity scoring, and model-specific prompt adaptation.
 
 See [docs/GENERATION_INTELLIGENCE.md](docs/GENERATION_INTELLIGENCE.md).
+
+## Assurance Pipeline
+
+Saar also includes an assurance workflow for expectation alignment before generation: structured desire extraction, concept options, confirmation, QA reports, precision revisions, and learning memory.
+
+See [docs/ASSURANCE_PIPELINE.md](docs/ASSURANCE_PIPELINE.md).

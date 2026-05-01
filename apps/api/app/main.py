@@ -8,12 +8,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from .config import get_settings
 from .db import get_db, init_db
+from .assurance import build_options_from_assurance, confirm_assurance_plan, create_assurance_plan, create_quality_report, create_revision_request, store_feedback_memory
 from .context_compiler import compile_generation_context
-from .models import Asset, AssetType, Job, JobEvent, JobStatus, MemoryItem, ModelEndpoint, PromptVersion, TaskType
+from .models import AssurancePlan, AssuranceStatus, Asset, AssetType, Job, JobEvent, JobStatus, MemoryItem, ModelEndpoint, PromptVersion, QualityReport, RevisionRequest, TaskType
 from .preflight import check_preflight
 from .r2 import presign_put, public_url_for_key
 from .router import resolve_endpoint
-from .schemas import CreateJobRequest, JobEventResponse, JobResponse, MemoryItemIn, MemoryItemOut, ModelEndpointIn, ModelEndpointOut, PresignUploadRequest, PresignUploadResponse, PromptVersionResponse
+from .schemas import AssurancePlanResponse, ConfirmAssuranceRequest, CreateJobRequest, DesireIntakeRequest, FeedbackIn, JobEventResponse, JobResponse, MemoryItemIn, MemoryItemOut, ModelEndpointIn, ModelEndpointOut, PresignUploadRequest, PresignUploadResponse, PromptVersionResponse, QualityReportResponse, RevisionRequestIn, RevisionRequestOut
 from .security import require_admin_token, require_api_token
 from .tasks import process_job
 
@@ -64,6 +65,13 @@ def presign_upload(body: PresignUploadRequest, db: Session = Depends(get_db)) ->
 
 @app.post("/api/jobs", response_model=JobResponse, dependencies=[Depends(require_api_token)])
 def create_job(body: CreateJobRequest, db: Session = Depends(get_db)) -> JobResponse:
+    if body.options.get("assurance_plan_id"):
+        plan = db.get(AssurancePlan, body.options["assurance_plan_id"])
+        if not plan:
+            raise HTTPException(status_code=400, detail="assurance_plan_id does not exist")
+        if plan.status != AssuranceStatus.confirmed:
+            raise HTTPException(status_code=400, detail="Assurance plan must be confirmed before generation")
+        body.options = build_options_from_assurance(plan, body.options)
     if body.input_asset_id:
         asset = db.get(Asset, body.input_asset_id)
         if not asset:
@@ -134,6 +142,32 @@ def create_job(body: CreateJobRequest, db: Session = Depends(get_db)) -> JobResp
     return to_job_response(job)
 
 
+@app.post("/api/assurance/intake", response_model=AssurancePlanResponse, dependencies=[Depends(require_api_token)])
+def assurance_intake(body: DesireIntakeRequest, db: Session = Depends(get_db)) -> AssurancePlan:
+    return create_assurance_plan(db, body)
+
+
+@app.post("/api/assurance/{plan_id}/confirm", response_model=AssurancePlanResponse, dependencies=[Depends(require_api_token)])
+def assurance_confirm(plan_id: str, body: ConfirmAssuranceRequest, db: Session = Depends(get_db)) -> AssurancePlan:
+    plan = db.get(AssurancePlan, plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Assurance plan not found")
+    return confirm_assurance_plan(db, plan, body.selected_concept_id, body.edits)
+
+
+@app.post("/api/assurance/{plan_id}/jobs", response_model=JobResponse, dependencies=[Depends(require_api_token)])
+def create_job_from_assurance(plan_id: str, body: CreateJobRequest, db: Session = Depends(get_db)) -> JobResponse:
+    plan = db.get(AssurancePlan, plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Assurance plan not found")
+    if plan.status != AssuranceStatus.confirmed:
+        raise HTTPException(status_code=400, detail="Assurance plan must be confirmed before generation")
+    body.prompt = body.prompt or plan.raw_idea
+    body.user_id = body.user_id or plan.user_id
+    body.options = build_options_from_assurance(plan, {**body.options, "assurance_plan_id": plan.id, "project_id": plan.project_id})
+    return create_job(body, db)
+
+
 @app.get("/api/jobs", response_model=list[JobResponse], dependencies=[Depends(require_api_token)])
 def list_jobs(db: Session = Depends(get_db)) -> list[JobResponse]:
     jobs = db.execute(select(Job).order_by(Job.created_at.desc()).limit(100)).scalars().all()
@@ -153,6 +187,28 @@ def get_job_events(job_id: str, db: Session = Depends(get_db)) -> list[JobEvent]
     if not db.get(Job, job_id):
         raise HTTPException(status_code=404, detail="Job not found")
     return list(db.execute(select(JobEvent).where(JobEvent.job_id == job_id).order_by(JobEvent.created_at.asc())).scalars().all())
+
+
+@app.post("/api/jobs/{job_id}/quality-report", response_model=QualityReportResponse, dependencies=[Depends(require_api_token)])
+def generate_quality_report(job_id: str, db: Session = Depends(get_db)) -> QualityReport:
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return create_quality_report(db, job)
+
+
+@app.post("/api/revisions", response_model=RevisionRequestOut, dependencies=[Depends(require_api_token)])
+def create_revision(body: RevisionRequestIn, db: Session = Depends(get_db)) -> RevisionRequest:
+    if not db.get(Job, body.job_id):
+        raise HTTPException(status_code=404, detail="Job not found")
+    return create_revision_request(db, job_id=body.job_id, user_id=body.user_id, type=body.type, target=body.target, instruction=body.instruction)
+
+
+@app.post("/api/feedback", response_model=list[MemoryItemOut], dependencies=[Depends(require_api_token)])
+def submit_feedback(body: FeedbackIn, db: Session = Depends(get_db)) -> list[MemoryItem]:
+    if not db.get(Job, body.job_id):
+        raise HTTPException(status_code=404, detail="Job not found")
+    return store_feedback_memory(db, body)
 
 
 @app.get("/api/jobs/{job_id}/prompt-version", response_model=PromptVersionResponse, dependencies=[Depends(require_api_token)])
