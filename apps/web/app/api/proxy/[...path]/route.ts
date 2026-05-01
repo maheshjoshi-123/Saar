@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const API_URL = process.env.SAAR_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_URL = process.env.SAAR_API_URL || "http://localhost:8000";
 const API_TOKEN = process.env.SAAR_API_TOKEN || "";
 const ADMIN_TOKEN = process.env.SAAR_ADMIN_TOKEN || API_TOKEN;
 const ADMIN_UI_KEY = process.env.SAAR_ADMIN_UI_KEY || "";
@@ -12,7 +12,7 @@ type RouteContext = {
 async function proxy(request: NextRequest, context: RouteContext) {
   const { path } = await context.params;
   const joined = path.join("/");
-  const backendPath = joined.startsWith("api/") ? `/${joined}` : `/api/${joined}`;
+  const backendPath = joined === "health" || joined === "ready" ? `/${joined}` : joined.startsWith("api/") ? `/${joined}` : `/api/${joined}`;
   const target = new URL(backendPath, API_URL);
   request.nextUrl.searchParams.forEach((value, key) => target.searchParams.set(key, value));
 
@@ -28,12 +28,24 @@ async function proxy(request: NextRequest, context: RouteContext) {
   const method = request.method.toUpperCase();
   const body = method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer();
 
-  const response = await fetch(target, {
-    method,
-    headers,
-    body,
-    cache: "no-store",
-  });
+  let response: Response;
+  try {
+    response = await fetch(target, {
+      method,
+      headers,
+      body,
+      cache: "no-store",
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        detail: "Saar API is unavailable",
+        target: target.origin,
+        error: error instanceof Error ? error.message : "Unknown proxy error",
+      },
+      { status: 503 },
+    );
+  }
 
   const responseHeaders = new Headers(response.headers);
   responseHeaders.delete("content-encoding");

@@ -261,10 +261,22 @@ export default function Home() {
   const currentJob = activeJob.data;
   const assuranceReady = plan?.status === "confirmed";
   const progress = assuranceReady ? 66 : plan ? 40 : 12;
+  const serviceError = pricing.error || wallet.error || jobs.error || estimate.error;
 
   function onAssuranceSubmit(event: FormEvent) {
     event.preventDefault();
     createPlan.mutate();
+  }
+
+  function refreshWorkspace() {
+    jobs.refetch();
+    wallet.refetch();
+    estimate.refetch();
+    pricing.refetch();
+    if (activeJobId) {
+      activeJob.refetch();
+      promptVersion.refetch();
+    }
   }
 
   return (
@@ -281,7 +293,7 @@ export default function Home() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => jobs.refetch()} className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">
+            <button onClick={refreshWorkspace} className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">
               <RefreshCw size={15} /> Refresh
             </button>
           </div>
@@ -308,6 +320,14 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {serviceError ? (
+        <div className="border-b border-amber-200 bg-amber-50">
+          <div className="mx-auto max-w-7xl px-6 py-3 text-sm text-amber-900">
+            API connection needs attention: {(serviceError as Error).message}
+          </div>
+        </div>
+      ) : null}
 
       <div className="mx-auto max-w-7xl px-6 py-6">
         <nav className="mb-5 flex gap-1 border-b border-slate-200">
