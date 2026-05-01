@@ -107,6 +107,10 @@ def create_job(body: CreateJobRequest, db: Session = Depends(get_db), x_saar_use
         asset = db.get(Asset, body.input_asset_id)
         if not asset:
             raise HTTPException(status_code=400, detail="input_asset_id does not exist")
+        if asset.user_id and body.user_id and asset.user_id != body.user_id:
+            raise HTTPException(status_code=403, detail="input_asset_id does not belong to this user")
+        if settings.user_auth_enforced and asset.user_id != body.user_id:
+            raise HTTPException(status_code=403, detail="input_asset_id does not belong to this user")
     else:
         asset = None
 

@@ -8,6 +8,9 @@
     "api:dev": "uvicorn apps.api.app.main:app --reload --host 0.0.0.0 --port 8000",
     "api:preflight": "python scripts/preflight.py",
     "test:smoke": "python scripts/smoke_test.py",
+    "test:security": "python scripts/security_smoke_test.py",
+    "test:frontend-proxy": "python scripts/frontend_proxy_smoke.py",
+    "qa": "python -m compileall apps/api workers/runpod-comfyui scripts && python scripts/smoke_test.py && python scripts/security_smoke_test.py && npm --prefix apps/web run build && npm --prefix apps/web audit --omit=dev && python scripts/frontend_proxy_smoke.py",
     "docker:up": "docker compose -f infra/docker-compose.yml up --build",
     "docker:down": "docker compose -f infra/docker-compose.yml down"
   }

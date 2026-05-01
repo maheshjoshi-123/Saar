@@ -10,10 +10,13 @@ Run locally:
 python -m compileall apps/api workers/runpod-comfyui scripts
 python scripts/smoke_test.py
 python scripts/security_smoke_test.py
+python scripts/frontend_proxy_smoke.py
 cd apps/web && npm run build && npm audit --omit=dev
 ```
 
 All commands must pass.
+
+If `next build` reports a transient `/_not-found` page module error on a development machine, stop the running `next dev` process, remove `apps/web/.next`, and run the build again. The production build and the dev server must not write to the same `.next` directory at the same time.
 
 ## 2. Cloud Requirements
 

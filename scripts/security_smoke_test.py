@@ -20,6 +20,8 @@ os.environ["USER_AUTH_SECRET"] = "security-user-secret"
 from fastapi.testclient import TestClient  # noqa: E402
 from apps.api.app.main import app  # noqa: E402
 from apps.api.app.db import engine  # noqa: E402
+from apps.api.app.db import SessionLocal  # noqa: E402
+from apps.api.app.models import Asset, AssetType  # noqa: E402
 
 
 def main() -> None:
@@ -45,6 +47,23 @@ def main() -> None:
 
         grant = client.post("/api/admin/billing/grant", headers=admin_headers, json={"user_id": "user-a", "amount": 200})
         assert grant.status_code == 200, grant.text
+
+        db = SessionLocal()
+        try:
+            foreign_asset = Asset(user_id="user-b", type=AssetType.image, r2_key="inputs/user-b/source.png", public_url="https://example.com/source.png", mime_type="image/png")
+            db.add(foreign_asset)
+            db.commit()
+            db.refresh(foreign_asset)
+            foreign_asset_id = foreign_asset.id
+        finally:
+            db.close()
+
+        stolen_asset = client.post(
+            "/api/jobs",
+            headers=user_headers,
+            json={"user_id": "user-a", "prompt": "animate this image", "task_type": "image_to_video", "input_asset_id": foreign_asset_id},
+        )
+        assert stolen_asset.status_code == 403, stolen_asset.text
 
         created = client.post(
             "/api/jobs",

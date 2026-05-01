@@ -256,7 +256,8 @@ export default function Home() {
 
   const selectedTask = useMemo(() => TASKS.find((item) => item.value === taskType), [taskType]);
   const fileRequired = taskType === "image_to_video" || taskType === "video_upscale";
-  const hasEnoughCredits = estimate.data?.has_enough_credits !== false;
+  const creditState = !estimate.data ? "checking" : estimate.data.has_enough_credits === false ? "needed" : "ready";
+  const hasEnoughCredits = creditState === "ready";
   const canGenerate = Boolean(idea) && Boolean(userId) && hasEnoughCredits && (!fileRequired || Boolean(file)) && !createJob.isPending;
   const currentJob = activeJob.data;
   const assuranceReady = plan?.status === "confirmed";
@@ -306,7 +307,7 @@ export default function Home() {
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge tone={plan ? "green" : "slate"}>{plan ? "Brief compiled" : "Draft brief"}</StatusBadge>
               <StatusBadge tone={assuranceReady ? "green" : "amber"}>{assuranceReady ? "Route approved" : "Awaiting approval"}</StatusBadge>
-              <StatusBadge tone={hasEnoughCredits ? "green" : "red"}>{hasEnoughCredits ? "Credits ready" : "Credits needed"}</StatusBadge>
+              <StatusBadge tone={creditState === "ready" ? "green" : creditState === "needed" ? "red" : "slate"}>{creditState === "ready" ? "Credits ready" : creditState === "needed" ? "Credits needed" : "Checking credits"}</StatusBadge>
             </div>
             <h2 className="mt-4 max-w-3xl text-3xl font-semibold tracking-tight">Create a controlled product video</h2>
             <div className="mt-5 h-2 max-w-2xl overflow-hidden rounded-full bg-slate-100">
