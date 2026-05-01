@@ -2,15 +2,14 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-  AlertTriangle,
   BadgePercent,
   CheckCircle2,
-  ClipboardCheck,
+  ChevronDown,
   Clapperboard,
   Coins,
+  FileVideo,
   Gauge,
-  ImagePlus,
-  Layers3,
+  LockKeyhole,
   Play,
   RefreshCw,
   ShieldCheck,
@@ -18,18 +17,30 @@ import {
   Ticket,
   UploadCloud,
   User,
-  WandSparkles,
 } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { api, AssurancePlan, CostEstimate, Coupon, Job, PricingPlan, PromptVersion, QualityReport, TaskType, userHeaders, Wallet, uploadAsset } from "@/lib/api";
+import {
+  api,
+  AssurancePlan,
+  CostEstimate,
+  Coupon,
+  Job,
+  PricingPlan,
+  PromptVersion,
+  QualityReport,
+  TaskType,
+  userHeaders,
+  Wallet,
+  uploadAsset,
+} from "@/lib/api";
 
 const TASKS: { value: TaskType; label: string; hint: string }[] = [
-  { value: "text_to_video_quality", label: "Text to Video", hint: "Wan T2V quality generation" },
-  { value: "image_to_video", label: "Image to Video", hint: "Wan I2V for animating a source image" },
-  { value: "fast_preview", label: "Fast Preview", hint: "LTX fast low-cost draft" },
-  { value: "premium_quality", label: "Premium Quality", hint: "Hunyuan/Wan high-quality workflow" },
-  { value: "video_upscale", label: "Video Upscale", hint: "Upscale or smooth a generated video" },
+  { value: "fast_preview", label: "Fast preview", hint: "Low-cost draft" },
+  { value: "text_to_video_quality", label: "Text to video", hint: "Quality render" },
+  { value: "image_to_video", label: "Image to video", hint: "Animate a source image" },
+  { value: "premium_quality", label: "Premium quality", hint: "Best visual pass" },
+  { value: "video_upscale", label: "Video upscale", hint: "Polish existing video" },
 ];
 
 const SELECTORS = {
@@ -40,7 +51,10 @@ const SELECTORS = {
   realism: ["Natural", "Hyper-real", "Stylised"],
 };
 
+type TabKey = "brief" | "review" | "operations";
+
 export default function Home() {
+  const [activeTab, setActiveTab] = useState<TabKey>("brief");
   const [idea, setIdea] = useState("A premium Facebook Reel for a grey curved-brim cap on a Kathmandu rooftop, model adjusts the cap once");
   const [style, setStyle] = useState("Luxury");
   const [mood, setMood] = useState("Aspirational");
@@ -65,9 +79,11 @@ export default function Home() {
   const [qualityReport, setQualityReport] = useState<QualityReport | null>(null);
   const [revisionText, setRevisionText] = useState("Make the camera movement slower and keep the cap logo stable");
 
+  const scopedHeaders = userHeaders(userId, userToken);
+
   const jobs = useQuery({
     queryKey: ["jobs", userId, userToken],
-    queryFn: () => api<Job[]>(`/api/jobs?user_id=${encodeURIComponent(userId)}`, { headers: userHeaders(userId, userToken) }),
+    queryFn: () => api<Job[]>(`/api/jobs?user_id=${encodeURIComponent(userId)}`, { headers: scopedHeaders }),
     enabled: Boolean(userId),
     refetchInterval: 5000,
   });
@@ -79,30 +95,30 @@ export default function Home() {
 
   const wallet = useQuery({
     queryKey: ["wallet", userId, userToken],
-    queryFn: () => api<Wallet>(`/api/billing/wallet?user_id=${encodeURIComponent(userId)}`, { headers: userHeaders(userId, userToken) }),
+    queryFn: () => api<Wallet>(`/api/billing/wallet?user_id=${encodeURIComponent(userId)}`, { headers: scopedHeaders }),
     enabled: Boolean(userId),
   });
 
   const estimate = useQuery({
-    queryKey: ["estimate", taskType, userId, plan?.confidence.expectation_match_score],
+    queryKey: ["estimate", taskType, userId, userToken],
     queryFn: () =>
       api<CostEstimate>("/api/jobs/estimate", {
         method: "POST",
+        headers: scopedHeaders,
         body: JSON.stringify({
           task_type: taskType,
           duration_seconds: 6,
           quality: taskType === "premium_quality" ? "premium" : taskType === "fast_preview" ? "preview" : "standard",
-          complexity_score: 5,
+          complexity_score: plan?.confidence.visual_risk === "medium" ? 6 : 5,
           user_id: userId || null,
         }),
-        headers: userHeaders(userId, userToken),
       }),
     enabled: Boolean(userId),
   });
 
   const activeJob = useQuery({
     queryKey: ["job", activeJobId, userId, userToken],
-    queryFn: () => api<Job>(`/api/jobs/${activeJobId}?user_id=${encodeURIComponent(userId)}`, { headers: userHeaders(userId, userToken) }),
+    queryFn: () => api<Job>(`/api/jobs/${activeJobId}?user_id=${encodeURIComponent(userId)}`, { headers: scopedHeaders }),
     enabled: Boolean(activeJobId),
     refetchInterval: (query) => {
       const status = query.state.data?.status;
@@ -112,7 +128,7 @@ export default function Home() {
 
   const promptVersion = useQuery({
     queryKey: ["prompt-version", activeJobId, userId, userToken],
-    queryFn: () => api<PromptVersion>(`/api/jobs/${activeJobId}/prompt-version?user_id=${encodeURIComponent(userId)}`, { headers: userHeaders(userId, userToken) }),
+    queryFn: () => api<PromptVersion>(`/api/jobs/${activeJobId}/prompt-version?user_id=${encodeURIComponent(userId)}`, { headers: scopedHeaders }),
     enabled: Boolean(activeJobId),
   });
 
@@ -120,13 +136,14 @@ export default function Home() {
     mutationFn: () =>
       api<AssurancePlan>("/api/assurance/intake", {
         method: "POST",
-        headers: userHeaders(userId, userToken),
+        headers: scopedHeaders,
         body: JSON.stringify({ raw_idea: idea, user_id: userId, style, mood, platform, pace, realism, audience, product, location, duration_seconds: 6 }),
       }),
     onSuccess: (nextPlan) => {
       setPlan(nextPlan);
       setSelectedConcept(nextPlan.concept_options[0]?.id || null);
       setQualityReport(null);
+      setActiveTab("review");
     },
   });
 
@@ -134,7 +151,7 @@ export default function Home() {
     mutationFn: () =>
       api<AssurancePlan>(`/api/assurance/${plan?.id}/confirm?user_id=${encodeURIComponent(userId)}`, {
         method: "POST",
-        headers: userHeaders(userId, userToken),
+        headers: scopedHeaders,
         body: JSON.stringify({ selected_concept_id: selectedConcept }),
       }),
     onSuccess: setPlan,
@@ -149,7 +166,7 @@ export default function Home() {
       const path = plan?.status === "confirmed" ? `/api/assurance/${plan.id}/jobs` : "/api/jobs";
       return api<Job>(path, {
         method: "POST",
-        headers: userHeaders(userId, userToken),
+        headers: scopedHeaders,
         body: JSON.stringify({
           prompt: idea,
           task_type: taskType,
@@ -174,6 +191,7 @@ export default function Home() {
       jobs.refetch();
       wallet.refetch();
       estimate.refetch();
+      setActiveTab("operations");
     },
   });
 
@@ -181,7 +199,7 @@ export default function Home() {
     mutationFn: () =>
       api<Wallet>("/api/coupons/redeem", {
         method: "POST",
-        headers: userHeaders(userId, userToken),
+        headers: scopedHeaders,
         body: JSON.stringify({ user_id: userId, code: couponCode }),
       }),
     onSuccess: () => wallet.refetch(),
@@ -207,7 +225,7 @@ export default function Home() {
   });
 
   const generateQa = useMutation({
-    mutationFn: () => api<QualityReport>(`/api/jobs/${activeJobId}/quality-report?user_id=${encodeURIComponent(userId)}`, { method: "POST", headers: userHeaders(userId, userToken) }),
+    mutationFn: () => api<QualityReport>(`/api/jobs/${activeJobId}/quality-report?user_id=${encodeURIComponent(userId)}`, { method: "POST", headers: scopedHeaders }),
     onSuccess: setQualityReport,
   });
 
@@ -215,7 +233,7 @@ export default function Home() {
     mutationFn: () =>
       api("/api/revisions", {
         method: "POST",
-        headers: userHeaders(userId, userToken),
+        headers: scopedHeaders,
         body: JSON.stringify({ job_id: activeJobId, user_id: userId, type: "motion", target: { scope: "whole_video" }, instruction: revisionText }),
       }),
   });
@@ -224,7 +242,7 @@ export default function Home() {
     mutationFn: (approved: boolean) =>
       api("/api/feedback", {
         method: "POST",
-        headers: userHeaders(userId, userToken),
+        headers: scopedHeaders,
         body: JSON.stringify({
           job_id: activeJobId,
           user_id: userId,
@@ -241,6 +259,8 @@ export default function Home() {
   const hasEnoughCredits = estimate.data?.has_enough_credits !== false;
   const canGenerate = Boolean(idea) && Boolean(userId) && hasEnoughCredits && (!fileRequired || Boolean(file)) && !createJob.isPending;
   const currentJob = activeJob.data;
+  const assuranceReady = plan?.status === "confirmed";
+  const progress = assuranceReady ? 66 : plan ? 40 : 12;
 
   function onAssuranceSubmit(event: FormEvent) {
     event.preventDefault();
@@ -248,263 +268,362 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-mist">
-      <header className="border-b border-line bg-white">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-5">
-          <div>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-ink text-white">
-                <Clapperboard size={20} />
-              </div>
-              <div>
-                <h1 className="text-2xl font-semibold tracking-tight">Saar Video Production Factory</h1>
-                <p className="mt-1 text-sm text-slate-600">Expectation alignment, generation packets, queued RunPod rendering, QA and revision memory</p>
-              </div>
+    <main className="min-h-screen bg-[#f7f9fc] text-ink">
+      <header className="border-b border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-ink text-white">
+              <Clapperboard size={20} />
+            </div>
+            <div>
+              <h1 className="text-lg font-semibold tracking-tight">Saar</h1>
+              <p className="text-xs text-slate-500">Video production console</p>
             </div>
           </div>
-          <button onClick={() => jobs.refetch()} className="inline-flex items-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-sm">
-            <RefreshCw size={16} /> Refresh jobs
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => jobs.refetch()} className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">
+              <RefreshCw size={15} /> Refresh
+            </button>
+          </div>
         </div>
       </header>
 
-      <section className="border-b border-line bg-white">
-        <div className="mx-auto grid max-w-7xl gap-6 px-6 py-6 lg:grid-cols-[1fr_420px]">
-          <div className="grid gap-4 sm:grid-cols-4">
-            <Metric icon={<ClipboardCheck size={18} />} label="Assurance" value={plan?.status || "not started"} />
-            <Metric icon={<Gauge size={18} />} label="Match score" value={plan?.confidence.expectation_match_score ? `${plan.confidence.expectation_match_score}%` : "pending"} />
-            <Metric icon={<ShieldCheck size={18} />} label="Visual risk" value={plan?.confidence.visual_risk || "pending"} />
-            <Metric icon={<Layers3 size={18} />} label="Active job" value={currentJob?.status || "none"} />
+      <section className="border-b border-slate-200 bg-white">
+        <div className="mx-auto grid max-w-7xl gap-6 px-6 py-5 lg:grid-cols-[1fr_360px]">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge tone={plan ? "green" : "slate"}>{plan ? "Brief compiled" : "Draft brief"}</StatusBadge>
+              <StatusBadge tone={assuranceReady ? "green" : "amber"}>{assuranceReady ? "Route approved" : "Awaiting approval"}</StatusBadge>
+              <StatusBadge tone={hasEnoughCredits ? "green" : "red"}>{hasEnoughCredits ? "Credits ready" : "Credits needed"}</StatusBadge>
+            </div>
+            <h2 className="mt-4 max-w-3xl text-3xl font-semibold tracking-tight">Create a controlled product video</h2>
+            <div className="mt-5 h-2 max-w-2xl overflow-hidden rounded-full bg-slate-100">
+              <div className="h-full rounded-full bg-teal transition-all" style={{ width: `${currentJob ? 100 : progress}%` }} />
+            </div>
           </div>
-          <div className="rounded-lg border border-line bg-mist p-4">
-            <p className="text-sm font-semibold text-ink">Production rule</p>
-            <p className="mt-1 text-sm text-slate-600">No final render should start until the user confirms what Saar understood. Use previews, QA, and precise revisions to reduce expensive mismatch.</p>
+          <div className="grid grid-cols-3 gap-3">
+            <Metric label="Balance" value={wallet.data ? `${wallet.data.balance}` : "--"} />
+            <Metric label="Cost" value={estimate.data ? `${estimate.data.required_credits}` : "--"} />
+            <Metric label="Job" value={currentJob?.status || "none"} />
           </div>
         </div>
       </section>
 
-      <div className="mx-auto grid max-w-7xl gap-6 px-6 py-6 xl:grid-cols-[460px_1fr]">
-        <section className="space-y-6">
-          <WorkflowCard step="1" title="Desire Extraction" icon={<WandSparkles className="text-teal" />}>
-            <form onSubmit={onAssuranceSubmit} className="space-y-4">
-              <label className="block">
-                <span className="text-sm font-medium">User idea</span>
-                <textarea value={idea} onChange={(e) => setIdea(e.target.value)} required rows={5} className="mt-2 w-full rounded-md border border-line px-3 py-2" />
-              </label>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Select label="Style" value={style} setValue={setStyle} options={SELECTORS.style} />
-                <Select label="Mood" value={mood} setValue={setMood} options={SELECTORS.mood} />
-                <Select label="Platform" value={platform} setValue={setPlatform} options={SELECTORS.platform} />
-                <Select label="Pace" value={pace} setValue={setPace} options={SELECTORS.pace} />
-                <Select label="Realism" value={realism} setValue={setRealism} options={SELECTORS.realism} />
-                <label className="block">
-                  <span className="text-sm font-medium">Audience</span>
-                  <input value={audience} onChange={(e) => setAudience(e.target.value)} className="mt-2 w-full rounded-md border border-line px-3 py-2" />
-                </label>
-                <label className="block">
-                  <span className="text-sm font-medium">Hero subject</span>
-                  <input value={product} onChange={(e) => setProduct(e.target.value)} className="mt-2 w-full rounded-md border border-line px-3 py-2" />
-                </label>
-                <label className="block">
-                  <span className="text-sm font-medium">Location</span>
-                  <input value={location} onChange={(e) => setLocation(e.target.value)} className="mt-2 w-full rounded-md border border-line px-3 py-2" />
-                </label>
-              </div>
-              <button disabled={!idea || createPlan.isPending} className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-ink px-4 py-3 font-medium text-white disabled:opacity-50">
-                <Sparkles size={16} /> {createPlan.isPending ? "Compiling..." : "Compile expectation plan"}
-              </button>
-              {createPlan.error ? <ErrorText error={createPlan.error} /> : null}
-            </form>
-          </WorkflowCard>
+      <div className="mx-auto max-w-7xl px-6 py-6">
+        <nav className="mb-5 flex gap-1 border-b border-slate-200">
+          <TabButton active={activeTab === "brief"} onClick={() => setActiveTab("brief")}>Brief</TabButton>
+          <TabButton active={activeTab === "review"} onClick={() => setActiveTab("review")}>Review</TabButton>
+          <TabButton active={activeTab === "operations"} onClick={() => setActiveTab("operations")}>Operations</TabButton>
+        </nav>
 
-          <WorkflowCard step="Billing" title="Tokens, Pricing and Coupons" icon={<Coins className="text-teal" />}>
-            <div className="space-y-4">
-              <label className="block">
-                <span className="inline-flex items-center gap-2 text-sm font-medium"><User size={16} /> User ID</span>
-                <input value={userId} onChange={(e) => setUserId(e.target.value)} className="mt-2 w-full rounded-md border border-line px-3 py-2" />
-              </label>
-              <label className="block">
-                <span className="text-sm font-medium">User access token</span>
-                <input type="password" value={userToken} onChange={(e) => setUserToken(e.target.value)} className="mt-2 w-full rounded-md border border-line px-3 py-2" />
-              </label>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Info label="Token balance" value={wallet.data ? `${wallet.data.balance} credits` : "loading"} />
-                <Info label="This generation" value={estimate.data ? `${estimate.data.required_credits} credits` : "pending"} />
-                <Info label="GPU estimate" value={estimate.data ? `${estimate.data.estimated_gpu_seconds}s` : "pending"} />
-              </div>
-              {estimate.data?.has_enough_credits === false ? (
-                <p className="rounded-md bg-red-50 p-3 text-sm text-red-800">
-                  Not enough credits. Required {estimate.data.required_credits}, available {estimate.data.user_balance ?? 0}.
-                </p>
-              ) : (
-                <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-800">This user has enough tokens for the selected generation type.</p>
-              )}
-              <div className="grid gap-3 sm:grid-cols-3">
-                {(pricing.data || []).map((item) => (
-                  <div key={item.id} className="rounded-md border border-line p-3">
-                    <p className="font-semibold">{item.name}</p>
-                    <p className="mt-1 text-sm text-slate-600">NPR {item.price_npr.toLocaleString()} / {item.credits} credits</p>
-                    <p className="mt-1 text-xs text-slate-500">Up to {item.max_video_seconds}s videos</p>
-                  </div>
-                ))}
-              </div>
-              <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                <input value={couponCode} onChange={(e) => setCouponCode(e.target.value)} className="rounded-md border border-line px-3 py-2 text-sm" />
-                <button onClick={() => redeemCoupon.mutate()} disabled={!couponCode || redeemCoupon.isPending} className="inline-flex items-center justify-center gap-2 rounded-md border border-line px-3 py-2 text-sm disabled:opacity-50">
-                  <Ticket size={16} /> Redeem
-                </button>
-              </div>
-              {redeemCoupon.error ? <ErrorText error={redeemCoupon.error} /> : null}
-              <details className="rounded-md border border-line bg-mist p-3">
-                <summary className="cursor-pointer text-sm font-medium">Admin pricing controls</summary>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <label className="block sm:col-span-2">
-                    <span className="text-xs font-medium">Admin UI key</span>
-                    <input type="password" value={adminKey} onChange={(e) => setAdminKey(e.target.value)} className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm" />
-                  </label>
-                  <label className="block">
-                    <span className="text-xs font-medium">Grant credits</span>
-                    <input type="number" value={adminGrantAmount} onChange={(e) => setAdminGrantAmount(Number(e.target.value))} className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm" />
-                  </label>
-                  <button onClick={() => grantCredits.mutate()} disabled={grantCredits.isPending || !userId} className="inline-flex items-end justify-center gap-2 rounded-md bg-ink px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
-                    <Coins size={16} /> Grant
-                  </button>
-                  <label className="block">
-                    <span className="text-xs font-medium">Coupon code</span>
-                    <input value={adminCouponCode} onChange={(e) => setAdminCouponCode(e.target.value)} className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm" />
-                  </label>
-                  <label className="block">
-                    <span className="text-xs font-medium">Coupon credits</span>
-                    <input type="number" value={adminCouponCredits} onChange={(e) => setAdminCouponCredits(Number(e.target.value))} className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm" />
-                  </label>
-                  <button onClick={() => createCoupon.mutate()} disabled={createCoupon.isPending || !adminCouponCode} className="inline-flex items-center justify-center gap-2 rounded-md border border-line px-3 py-2 text-sm disabled:opacity-50 sm:col-span-2">
-                    <BadgePercent size={16} /> Create or update coupon
-                  </button>
-                </div>
-                {grantCredits.error ? <ErrorText error={grantCredits.error} /> : null}
-                {createCoupon.error ? <ErrorText error={createCoupon.error} /> : null}
-                {createCoupon.data ? <p className="mt-3 rounded-md bg-emerald-50 p-2 text-sm text-emerald-800">Coupon {createCoupon.data.code} is active.</p> : null}
-              </details>
-            </div>
-          </WorkflowCard>
-
-          <WorkflowCard step="4" title="Controlled Generation" icon={<Play className="text-teal" />}>
-            <div className="space-y-4">
-              <label className="block">
-                <span className="text-sm font-medium">Task</span>
-                <select value={taskType} onChange={(e) => setTaskType(e.target.value as TaskType)} className="mt-2 w-full rounded-md border border-line px-3 py-2">
-                  {TASKS.map((task) => (
-                    <option key={task.value} value={task.value}>{task.label}</option>
-                  ))}
-                </select>
-                <span className="mt-1 block text-xs text-slate-500">{selectedTask?.hint}</span>
-              </label>
-              <label className="block rounded-md border border-dashed border-line p-4">
-                <span className="inline-flex items-center gap-2 text-sm font-medium"><UploadCloud size={16} /> {fileRequired ? "Required input file" : "Optional input file"}</span>
-                <input type="file" accept="image/*,video/*,audio/*" onChange={(e) => setFile(e.target.files?.[0] || null)} className="mt-3 block w-full text-sm" />
-                {file ? <span className="mt-2 block text-xs text-slate-500">{file.name}</span> : null}
-              </label>
-              {fileRequired && !file ? <p className="text-sm text-slate-500">This task needs an input file before it can run.</p> : null}
-              {plan && plan.status !== "confirmed" ? <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">Confirm the expectation plan before generation.</p> : null}
-              <button disabled={!canGenerate || (Boolean(plan) && plan?.status !== "confirmed")} onClick={() => createJob.mutate()} className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-teal px-4 py-3 font-medium text-white disabled:opacity-50">
-                <Play size={16} /> {createJob.isPending ? "Submitting..." : "Generate controlled video"}
-              </button>
-              {createJob.error ? <ErrorText error={createJob.error} /> : null}
-            </div>
-          </WorkflowCard>
-        </section>
-
-        <section className="space-y-6">
-          <WorkflowCard step="2" title="Expectation Alignment" icon={<ClipboardCheck className="text-teal" />}>
-            {plan ? (
-              <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
+        {activeTab === "brief" ? (
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <section className="rounded-lg border border-slate-200 bg-white p-6">
+              <div className="mb-6 flex items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-semibold">Saar understood</h3>
-                  <ul className="mt-3 space-y-2">
-                    {(plan.expectation_summary.you_want || []).map((item) => (
-                      <li key={item} className="flex gap-2 text-sm text-slate-700"><CheckCircle2 className="mt-0.5 h-4 w-4 text-teal" /> {item}</li>
-                    ))}
-                  </ul>
-                  <h3 className="mt-4 text-sm font-semibold">Must confirm</h3>
-                  <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-                    {(plan.expectation_summary.must_confirm || []).map((item) => (
-                      <li key={item} className="rounded-md bg-mist px-3 py-2 text-sm">{item}</li>
-                    ))}
-                  </ul>
+                  <p className="text-sm font-medium text-slate-500">Creative brief</p>
+                  <h3 className="mt-1 text-xl font-semibold">Describe the outcome</h3>
                 </div>
-                <div className="rounded-lg border border-line p-4">
-                  <p className="text-xs uppercase tracking-wide text-slate-500">Confidence</p>
-                  <p className="mt-2 text-4xl font-semibold text-ink">{plan.confidence.expectation_match_score}%</p>
-                  <p className="mt-2 text-sm text-slate-600">Visual risk: {plan.confidence.visual_risk}</p>
-                  <p className="text-sm text-slate-600">Continuity risk: {plan.confidence.continuity_risk}</p>
-                  <p className="mt-3 rounded-md bg-mist p-2 text-sm">{plan.confidence.recommendation}</p>
-                </div>
+                <Sparkles className="text-teal" />
               </div>
-            ) : (
-              <EmptyState icon={<ClipboardCheck />} title="Compile a plan first" text="Saar will translate vague desire into a summary the user can confirm or edit." />
-            )}
-          </WorkflowCard>
 
-          <WorkflowCard step="3" title="Concept Options and Preview Route" icon={<ImagePlus className="text-teal" />}>
-            {plan ? (
-              <div className="grid gap-3 lg:grid-cols-3">
-                {plan.concept_options.map((concept) => (
-                  <button key={concept.id} onClick={() => setSelectedConcept(concept.id)} className={`rounded-lg border p-4 text-left transition ${selectedConcept === concept.id ? "border-teal bg-tealL" : "border-line bg-white hover:bg-mist"}`}>
-                    <ConceptGraphic active={selectedConcept === concept.id} />
-                    <h3 className="mt-3 font-semibold">{concept.name}</h3>
-                    <p className="mt-1 text-sm text-slate-600">{concept.description}</p>
-                    <dl className="mt-3 space-y-1 text-xs text-slate-500">
-                      <div>Lighting: {concept.lighting}</div>
-                      <div>Motion: {concept.camera_motion}</div>
-                    </dl>
+              <form onSubmit={onAssuranceSubmit} className="space-y-5">
+                <label className="block">
+                  <span className="text-sm font-medium">Video request</span>
+                  <textarea value={idea} onChange={(event) => setIdea(event.target.value)} required rows={6} className="mt-2 w-full resize-none rounded-md border border-slate-200 px-3 py-3 leading-6 outline-none focus:border-teal focus:ring-2 focus:ring-tealL" />
+                </label>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                  <SelectField label="Style" value={style} setValue={setStyle} options={SELECTORS.style} />
+                  <SelectField label="Platform" value={platform} setValue={setPlatform} options={SELECTORS.platform} />
+                  <SelectField label="Pace" value={pace} setValue={setPace} options={SELECTORS.pace} />
+                </div>
+
+                <details className="rounded-md border border-slate-200">
+                  <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-medium">
+                    Production details <ChevronDown size={16} />
+                  </summary>
+                  <div className="grid gap-4 border-t border-slate-200 p-4 md:grid-cols-2">
+                    <SelectField label="Mood" value={mood} setValue={setMood} options={SELECTORS.mood} />
+                    <SelectField label="Realism" value={realism} setValue={setRealism} options={SELECTORS.realism} />
+                    <TextField label="Audience" value={audience} setValue={setAudience} />
+                    <TextField label="Hero subject" value={product} setValue={setProduct} />
+                    <TextField label="Location" value={location} setValue={setLocation} />
+                    <TextField label="User ID" value={userId} setValue={setUserId} icon={<User size={15} />} />
+                    <TextField label="User access token" value={userToken} setValue={setUserToken} type="password" icon={<LockKeyhole size={15} />} />
+                  </div>
+                </details>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <button disabled={!idea || createPlan.isPending} className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-ink px-5 text-sm font-semibold text-white disabled:opacity-50">
+                    <Sparkles size={16} /> {createPlan.isPending ? "Compiling" : "Compile brief"}
                   </button>
-                ))}
-                <button disabled={!selectedConcept || confirmPlan.isPending} onClick={() => confirmPlan.mutate()} className="lg:col-span-3 inline-flex items-center justify-center gap-2 rounded-md bg-ink px-4 py-3 font-medium text-white disabled:opacity-50">
-                  <ShieldCheck size={16} /> {plan.status === "confirmed" ? "Expectation confirmed" : "Confirm selected route"}
-                </button>
+                  {createPlan.error ? <ErrorText error={createPlan.error} /> : null}
+                </div>
+              </form>
+            </section>
+
+            <SidePanel
+              pricing={pricing.data || []}
+              wallet={wallet.data}
+              estimate={estimate.data}
+              couponCode={couponCode}
+              setCouponCode={setCouponCode}
+              redeemCoupon={() => redeemCoupon.mutate()}
+              redeemPending={redeemCoupon.isPending}
+              redeemError={redeemCoupon.error as Error | null}
+            />
+          </div>
+        ) : null}
+
+        {activeTab === "review" ? (
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <section className="rounded-lg border border-slate-200 bg-white p-6">
+              <div className="mb-6 flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium text-slate-500">Expectation review</p>
+                  <h3 className="mt-1 text-xl font-semibold">Approve the route</h3>
+                </div>
+                <Gauge className="text-teal" />
               </div>
-            ) : (
-              <EmptyState icon={<ImagePlus />} title="No concepts yet" text="Saar will create three routes: urban premium, clean studio, and street lifestyle." />
-            )}
-          </WorkflowCard>
+              {plan ? (
+                <div className="space-y-6">
+                  <div className="grid gap-4 lg:grid-cols-[1fr_220px]">
+                    <div className="space-y-2">
+                      {(plan.expectation_summary.you_want || []).slice(0, 6).map((item) => (
+                        <div key={item} className="flex items-start gap-2 text-sm text-slate-700">
+                          <CheckCircle2 className="mt-0.5 h-4 w-4 text-teal" /> {item}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="rounded-md bg-slate-50 p-4">
+                      <p className="text-xs font-medium uppercase text-slate-500">Match score</p>
+                      <p className="mt-2 text-4xl font-semibold">{plan.confidence.expectation_match_score}%</p>
+                      <p className="mt-2 text-sm text-slate-500">Risk: {plan.confidence.visual_risk || "pending"}</p>
+                    </div>
+                  </div>
 
-          <WorkflowCard step="5-7" title="Active Job, QA, Revisions and Memory" icon={<ShieldCheck className="text-teal" />}>
-            {currentJob ? (
-              <JobDetail
-                job={currentJob}
-                promptVersion={promptVersion.data}
-                qualityReport={qualityReport}
-                onQa={() => generateQa.mutate()}
-                qaPending={generateQa.isPending}
-                revisionText={revisionText}
-                setRevisionText={setRevisionText}
-                onRevision={() => createRevision.mutate()}
-                revisionPending={createRevision.isPending}
-                onFeedback={sendFeedback.mutate}
-                feedbackPending={sendFeedback.isPending}
+                  <div className="grid gap-3 lg:grid-cols-3">
+                    {plan.concept_options.map((concept) => (
+                      <button key={concept.id} onClick={() => setSelectedConcept(concept.id)} className={`rounded-md border p-4 text-left transition ${selectedConcept === concept.id ? "border-teal bg-tealL" : "border-slate-200 bg-white hover:border-slate-300"}`}>
+                        <ConceptGraphic active={selectedConcept === concept.id} />
+                        <p className="mt-3 font-semibold">{concept.name}</p>
+                        <p className="mt-1 text-sm leading-5 text-slate-600">{concept.description}</p>
+                        <p className="mt-3 text-xs text-slate-500">{concept.camera_motion}</p>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button disabled={!selectedConcept || confirmPlan.isPending} onClick={() => confirmPlan.mutate()} className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-ink px-5 text-sm font-semibold text-white disabled:opacity-50">
+                      <ShieldCheck size={16} /> {plan.status === "confirmed" ? "Route approved" : "Approve route"}
+                    </button>
+                    <button onClick={() => setActiveTab("brief")} className="inline-flex h-11 items-center justify-center rounded-md border border-slate-200 px-4 text-sm font-medium text-slate-700">
+                      Edit brief
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <EmptyState title="No brief compiled" text="Start with a creative brief to generate route options." />
+              )}
+            </section>
+
+            <GeneratePanel
+              taskType={taskType}
+              setTaskType={setTaskType}
+              selectedTask={selectedTask}
+              file={file}
+              setFile={setFile}
+              fileRequired={fileRequired}
+              canGenerate={canGenerate && (!plan || plan.status === "confirmed")}
+              createJob={() => createJob.mutate()}
+              pending={createJob.isPending}
+              error={createJob.error as Error | null}
+              estimate={estimate.data}
+              hasEnoughCredits={hasEnoughCredits}
+            />
+          </div>
+        ) : null}
+
+        {activeTab === "operations" ? (
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <section className="rounded-lg border border-slate-200 bg-white p-6">
+              <div className="mb-6 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-500">Output control</p>
+                  <h3 className="mt-1 text-xl font-semibold">Active job</h3>
+                </div>
+                {currentJob ? <StatusPill status={currentJob.status} /> : null}
+              </div>
+              {currentJob ? (
+                <JobDetail
+                  job={currentJob}
+                  promptVersion={promptVersion.data}
+                  qualityReport={qualityReport}
+                  onQa={() => generateQa.mutate()}
+                  qaPending={generateQa.isPending}
+                  revisionText={revisionText}
+                  setRevisionText={setRevisionText}
+                  onRevision={() => createRevision.mutate()}
+                  revisionPending={createRevision.isPending}
+                  onFeedback={sendFeedback.mutate}
+                  feedbackPending={sendFeedback.isPending}
+                />
+              ) : (
+                <EmptyState title="No active job" text="Generate a video to monitor output and QA." />
+              )}
+            </section>
+
+            <section className="space-y-4">
+              <RecentJobs jobs={jobs.data || []} setActiveJobId={setActiveJobId} />
+              <AdminPanel
+                adminKey={adminKey}
+                setAdminKey={setAdminKey}
+                adminGrantAmount={adminGrantAmount}
+                setAdminGrantAmount={setAdminGrantAmount}
+                grantCredits={() => grantCredits.mutate()}
+                grantPending={grantCredits.isPending}
+                grantError={grantCredits.error as Error | null}
+                adminCouponCode={adminCouponCode}
+                setAdminCouponCode={setAdminCouponCode}
+                adminCouponCredits={adminCouponCredits}
+                setAdminCouponCredits={setAdminCouponCredits}
+                createCoupon={() => createCoupon.mutate()}
+                couponPending={createCoupon.isPending}
+                couponError={createCoupon.error as Error | null}
+                createdCoupon={createCoupon.data}
               />
-            ) : (
-              <EmptyState icon={<Clapperboard />} title="No active job" text="Generate a controlled video or select a job from history." />
-            )}
-          </WorkflowCard>
-
-          <WorkflowCard step="History" title="Recent Jobs" icon={<Layers3 className="text-teal" />}>
-            <div className="space-y-3">
-              {(jobs.data || []).map((job) => (
-                <button key={job.id} onClick={() => { setActiveJobId(job.id); setQualityReport(null); }} className="grid w-full grid-cols-[1fr_auto] gap-3 rounded-md border border-line p-3 text-left hover:bg-mist">
-                  <span>
-                    <span className="block text-sm font-medium">{job.prompt}</span>
-                    <span className="mt-1 block text-xs text-slate-500">{job.task_type} | complexity {job.complexity_score ?? "n/a"}</span>
-                  </span>
-                  <StatusPill status={job.status} />
-                </button>
-              ))}
-              {!jobs.data?.length ? <p className="text-sm text-slate-500">No jobs yet.</p> : null}
-            </div>
-          </WorkflowCard>
-        </section>
+            </section>
+          </div>
+        ) : null}
       </div>
     </main>
+  );
+}
+
+function SidePanel({
+  pricing,
+  wallet,
+  estimate,
+  couponCode,
+  setCouponCode,
+  redeemCoupon,
+  redeemPending,
+  redeemError,
+}: {
+  pricing: PricingPlan[];
+  wallet?: Wallet;
+  estimate?: CostEstimate;
+  couponCode: string;
+  setCouponCode: (value: string) => void;
+  redeemCoupon: () => void;
+  redeemPending: boolean;
+  redeemError: Error | null;
+}) {
+  return (
+    <aside className="space-y-4">
+      <section className="rounded-lg border border-slate-200 bg-white p-5">
+        <p className="text-sm font-medium text-slate-500">Credits</p>
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <Metric label="Balance" value={wallet ? `${wallet.balance}` : "--"} />
+          <Metric label="Estimate" value={estimate ? `${estimate.required_credits}` : "--"} />
+        </div>
+        {estimate?.has_enough_credits === false ? (
+          <p className="mt-4 rounded-md bg-red-50 p-3 text-sm text-red-800">Required {estimate.required_credits}, available {estimate.user_balance ?? 0}.</p>
+        ) : null}
+        <div className="mt-4 flex gap-2">
+          <input value={couponCode} onChange={(event) => setCouponCode(event.target.value)} className="min-w-0 flex-1 rounded-md border border-slate-200 px-3 py-2 text-sm" />
+          <button onClick={redeemCoupon} disabled={!couponCode || redeemPending} className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm font-medium disabled:opacity-50">
+            <Ticket size={15} /> Redeem
+          </button>
+        </div>
+        {redeemError ? <ErrorText error={redeemError} /> : null}
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-5">
+        <p className="text-sm font-medium text-slate-500">Plans</p>
+        <div className="mt-3 space-y-3">
+          {pricing.slice(0, 3).map((item) => (
+            <div key={item.id} className="flex items-center justify-between border-b border-slate-100 pb-3 last:border-0 last:pb-0">
+              <div>
+                <p className="font-medium">{item.name}</p>
+                <p className="text-xs text-slate-500">{item.credits} credits</p>
+              </div>
+              <p className="text-sm font-semibold">NPR {item.price_npr.toLocaleString()}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+    </aside>
+  );
+}
+
+function GeneratePanel({
+  taskType,
+  setTaskType,
+  selectedTask,
+  file,
+  setFile,
+  fileRequired,
+  canGenerate,
+  createJob,
+  pending,
+  error,
+  estimate,
+  hasEnoughCredits,
+}: {
+  taskType: TaskType;
+  setTaskType: (value: TaskType) => void;
+  selectedTask?: { value: TaskType; label: string; hint: string };
+  file: File | null;
+  setFile: (file: File | null) => void;
+  fileRequired: boolean;
+  canGenerate: boolean;
+  createJob: () => void;
+  pending: boolean;
+  error: Error | null;
+  estimate?: CostEstimate;
+  hasEnoughCredits: boolean;
+}) {
+  return (
+    <aside className="rounded-lg border border-slate-200 bg-white p-5">
+      <p className="text-sm font-medium text-slate-500">Render setup</p>
+      <div className="mt-4 space-y-4">
+        <label className="block">
+          <span className="text-sm font-medium">Task</span>
+          <select value={taskType} onChange={(event) => setTaskType(event.target.value as TaskType)} className="mt-2 w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
+            {TASKS.map((task) => (
+              <option key={task.value} value={task.value}>{task.label}</option>
+            ))}
+          </select>
+          <span className="mt-1 block text-xs text-slate-500">{selectedTask?.hint}</span>
+        </label>
+
+        <label className="block rounded-md border border-dashed border-slate-300 p-4">
+          <span className="inline-flex items-center gap-2 text-sm font-medium"><UploadCloud size={16} /> {fileRequired ? "Input required" : "Reference file"}</span>
+          <input type="file" accept="image/*,video/*,audio/*" onChange={(event) => setFile(event.target.files?.[0] || null)} className="mt-3 block w-full text-sm" />
+          {file ? <span className="mt-2 block text-xs text-slate-500">{file.name}</span> : null}
+        </label>
+
+        <div className="rounded-md bg-slate-50 p-3">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-slate-500">Required credits</span>
+            <span className="font-semibold">{estimate?.required_credits ?? "--"}</span>
+          </div>
+          <div className="mt-2 flex items-center justify-between text-sm">
+            <span className="text-slate-500">GPU estimate</span>
+            <span className="font-semibold">{estimate?.estimated_gpu_seconds ? `${estimate.estimated_gpu_seconds}s` : "--"}</span>
+          </div>
+        </div>
+
+        {!hasEnoughCredits ? <p className="rounded-md bg-red-50 p-3 text-sm text-red-800">Add credits before rendering.</p> : null}
+
+        <button disabled={!canGenerate} onClick={createJob} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-teal px-4 text-sm font-semibold text-white disabled:opacity-50">
+          <Play size={16} /> {pending ? "Submitting" : "Generate video"}
+        </button>
+        {error ? <ErrorText error={error} /> : null}
+      </div>
+    </aside>
   );
 }
 
@@ -534,92 +653,202 @@ function JobDetail({
   feedbackPending: boolean;
 }) {
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <StatusPill status={job.status} />
-        <span className="text-xs text-slate-500">{job.id}</span>
+    <div className="space-y-5">
+      <div className="grid gap-3 md:grid-cols-5">
+        <Metric label="Task" value={job.task_type.replaceAll("_", " ")} />
+        <Metric label="Model" value={job.model_key || "auto"} />
+        <Metric label="Complexity" value={job.complexity_score != null ? `${job.complexity_score}` : "--"} />
+        <Metric label="Credits" value={job.required_credits != null ? `${job.required_credits}` : "--"} />
+        <Metric label="Debited" value={job.debited_credits != null ? `${job.debited_credits}` : "0"} />
       </div>
-      <p className="text-sm">{job.prompt}</p>
-      <dl className="grid gap-2 text-sm sm:grid-cols-3">
-        <Info label="Task" value={job.task_type} />
-        <Info label="Model" value={job.model_key || "auto"} />
-        <Info label="Complexity" value={job.complexity_score != null ? `${job.complexity_score} / ${job.complexity_decision}` : "pending"} />
-        <Info label="Required credits" value={job.required_credits != null ? `${job.required_credits}` : "pending"} />
-        <Info label="Debited credits" value={job.debited_credits != null ? `${job.debited_credits}` : "not debited"} />
-      </dl>
+
       {job.error ? <p className="rounded-md bg-red-50 p-3 text-sm text-red-800">{job.error}</p> : null}
+
       {job.output_url ? (
         <video src={job.output_url} controls className="aspect-video w-full rounded-md bg-black" />
       ) : (
-        <div className="flex aspect-video items-center justify-center rounded-md border border-line bg-mist text-sm text-slate-500">
-          {job.status === "failed" ? "Generation failed" : "Waiting for output..."}
+        <div className="flex aspect-video items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-sm text-slate-500">
+          {job.status === "failed" ? "Generation failed" : "Waiting for output"}
         </div>
       )}
-      <div className="grid gap-3 lg:grid-cols-3">
-        <button onClick={onQa} disabled={qaPending || job.status !== "completed"} className="inline-flex items-center justify-center gap-2 rounded-md border border-line px-3 py-2 text-sm disabled:opacity-50">
+
+      <div className="flex flex-wrap gap-2">
+        <button onClick={onQa} disabled={qaPending || job.status !== "completed"} className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 px-3 text-sm font-medium disabled:opacity-50">
           <ShieldCheck size={16} /> Run QA
         </button>
-        <button onClick={() => onFeedback(true)} disabled={feedbackPending || !job.id} className="inline-flex items-center justify-center gap-2 rounded-md border border-line px-3 py-2 text-sm">
+        <button onClick={() => onFeedback(true)} disabled={feedbackPending} className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 px-3 text-sm font-medium">
           <CheckCircle2 size={16} /> Approve
         </button>
-        <button onClick={() => onFeedback(false)} disabled={feedbackPending || !job.id} className="inline-flex items-center justify-center gap-2 rounded-md border border-line px-3 py-2 text-sm">
-          <AlertTriangle size={16} /> Learn rejection
+        <button onClick={() => onFeedback(false)} disabled={feedbackPending} className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 px-3 text-sm font-medium">
+          <FileVideo size={16} /> Learn rejection
         </button>
       </div>
+
       {qualityReport ? <QualityPanel report={qualityReport} /> : null}
-      <div className="rounded-md border border-line p-3">
-        <label className="block text-sm font-medium">Precision revision</label>
-        <div className="mt-2 flex gap-2">
-          <input value={revisionText} onChange={(e) => setRevisionText(e.target.value)} className="min-w-0 flex-1 rounded-md border border-line px-3 py-2 text-sm" />
-          <button onClick={onRevision} disabled={revisionPending || !revisionText} className="rounded-md bg-ink px-3 py-2 text-sm font-medium text-white disabled:opacity-50">Save</button>
-        </div>
+
+      <div className="flex gap-2">
+        <input value={revisionText} onChange={(event) => setRevisionText(event.target.value)} className="min-w-0 flex-1 rounded-md border border-slate-200 px-3 py-2 text-sm" />
+        <button onClick={onRevision} disabled={revisionPending || !revisionText} className="rounded-md bg-ink px-4 text-sm font-semibold text-white disabled:opacity-50">Save</button>
       </div>
+
       {promptVersion ? (
-        <details className="rounded-md border border-line bg-mist p-3">
-          <summary className="cursor-pointer text-sm font-medium">Generation packet and final prompt</summary>
-          <p className="mt-3 text-xs font-semibold text-slate-600">Final model prompt</p>
-          <p className="mt-1 whitespace-pre-wrap text-sm">{promptVersion.final_prompt}</p>
-          <p className="mt-3 text-xs font-semibold text-slate-600">Packet JSON</p>
-          <pre className="mt-1 max-h-80 overflow-auto rounded bg-white p-3 text-xs">{JSON.stringify(promptVersion.generation_packet, null, 2)}</pre>
+        <details className="rounded-md border border-slate-200 bg-slate-50 p-4">
+          <summary className="cursor-pointer text-sm font-medium">Prompt packet</summary>
+          <p className="mt-3 whitespace-pre-wrap text-sm leading-6">{promptVersion.final_prompt}</p>
+          <pre className="mt-3 max-h-80 overflow-auto rounded bg-white p-3 text-xs">{JSON.stringify(promptVersion.generation_packet, null, 2)}</pre>
         </details>
       ) : null}
     </div>
   );
 }
 
-function WorkflowCard({ step, title, icon, children }: { step: string; title: string; icon: ReactNode; children: ReactNode }) {
+function RecentJobs({ jobs, setActiveJobId }: { jobs: Job[]; setActiveJobId: (id: string) => void }) {
   return (
-    <section className="rounded-lg border border-line bg-white p-5">
-      <div className="mb-5 flex items-center gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-md bg-mist">{icon}</div>
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{step}</p>
-          <h2 className="text-lg font-semibold">{title}</h2>
-        </div>
+    <section className="rounded-lg border border-slate-200 bg-white p-5">
+      <p className="text-sm font-medium text-slate-500">Recent jobs</p>
+      <div className="mt-3 space-y-2">
+        {jobs.slice(0, 6).map((job) => (
+          <button key={job.id} onClick={() => setActiveJobId(job.id)} className="w-full rounded-md border border-slate-100 p-3 text-left hover:bg-slate-50">
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-sm font-medium">{job.prompt}</span>
+              <StatusPill status={job.status} />
+            </div>
+            <p className="mt-1 text-xs text-slate-500">{job.task_type.replaceAll("_", " ")}</p>
+          </button>
+        ))}
+        {!jobs.length ? <p className="text-sm text-slate-500">No jobs yet.</p> : null}
       </div>
-      {children}
     </section>
   );
 }
 
-function Metric({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+function AdminPanel({
+  adminKey,
+  setAdminKey,
+  adminGrantAmount,
+  setAdminGrantAmount,
+  grantCredits,
+  grantPending,
+  grantError,
+  adminCouponCode,
+  setAdminCouponCode,
+  adminCouponCredits,
+  setAdminCouponCredits,
+  createCoupon,
+  couponPending,
+  couponError,
+  createdCoupon,
+}: {
+  adminKey: string;
+  setAdminKey: (value: string) => void;
+  adminGrantAmount: number;
+  setAdminGrantAmount: (value: number) => void;
+  grantCredits: () => void;
+  grantPending: boolean;
+  grantError: Error | null;
+  adminCouponCode: string;
+  setAdminCouponCode: (value: string) => void;
+  adminCouponCredits: number;
+  setAdminCouponCredits: (value: number) => void;
+  createCoupon: () => void;
+  couponPending: boolean;
+  couponError: Error | null;
+  createdCoupon?: Coupon;
+}) {
   return (
-    <div className="rounded-lg border border-line bg-white p-4">
-      <div className="flex items-center gap-2 text-slate-500">{icon}<span className="text-xs uppercase tracking-wide">{label}</span></div>
-      <p className="mt-2 truncate text-lg font-semibold">{value}</p>
+    <details className="rounded-lg border border-slate-200 bg-white p-5">
+      <summary className="cursor-pointer list-none text-sm font-medium text-slate-600">Admin controls</summary>
+      <div className="mt-4 space-y-3">
+        <TextField label="Admin UI key" value={adminKey} setValue={setAdminKey} type="password" />
+        <div className="grid grid-cols-[1fr_auto] gap-2">
+          <input type="number" value={adminGrantAmount} onChange={(event) => setAdminGrantAmount(Number(event.target.value))} className="rounded-md border border-slate-200 px-3 py-2 text-sm" />
+          <button onClick={grantCredits} disabled={grantPending} className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
+            <Coins size={15} /> Grant
+          </button>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <TextField label="Coupon code" value={adminCouponCode} setValue={setAdminCouponCode} />
+          <label className="block">
+            <span className="text-sm font-medium">Credits</span>
+            <input type="number" value={adminCouponCredits} onChange={(event) => setAdminCouponCredits(Number(event.target.value))} className="mt-2 w-full rounded-md border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+        </div>
+        <button onClick={createCoupon} disabled={couponPending || !adminCouponCode} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-slate-200 text-sm font-medium disabled:opacity-50">
+          <BadgePercent size={15} /> Create coupon
+        </button>
+        {createdCoupon ? <p className="rounded-md bg-emerald-50 p-2 text-sm text-emerald-800">{createdCoupon.code} active</p> : null}
+        {grantError ? <ErrorText error={grantError} /> : null}
+        {couponError ? <ErrorText error={couponError} /> : null}
+      </div>
+    </details>
+  );
+}
+
+function QualityPanel({ report }: { report: QualityReport }) {
+  const rows = [
+    ...Object.entries(report.technical_checks).map(([key, value]) => [key, value, "Technical"] as const),
+    ...Object.entries(report.commercial_checks).map(([key, value]) => [key, value, "Commercial"] as const),
+  ];
+  return (
+    <div className={`rounded-md border p-4 ${report.passed ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+      <p className="font-medium">{report.passed ? "QA passed" : "QA needs attention"}</p>
+      <div className="mt-3 grid gap-2 md:grid-cols-2">
+        {rows.map(([key, value, group]) => (
+          <div key={`${group}-${key}`} className="flex items-center justify-between rounded bg-white/70 px-3 py-2 text-sm">
+            <span>{key.replaceAll("_", " ")}</span>
+            <span className="font-medium">{value ? "Pass" : "Fix"}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
-function Select({ label, value, setValue, options }: { label: string; value: string; setValue: (value: string) => void; options: string[] }) {
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md bg-slate-50 p-3">
+      <p className="text-xs font-medium uppercase text-slate-500">{label}</p>
+      <p className="mt-1 truncate text-sm font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function SelectField({ label, value, setValue, options }: { label: string; value: string; setValue: (value: string) => void; options: string[] }) {
   return (
     <label className="block">
       <span className="text-sm font-medium">{label}</span>
-      <select value={value} onChange={(e) => setValue(e.target.value)} className="mt-2 w-full rounded-md border border-line px-3 py-2">
+      <select value={value} onChange={(event) => setValue(event.target.value)} className="mt-2 w-full rounded-md border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal focus:ring-2 focus:ring-tealL">
         {options.map((option) => <option key={option}>{option}</option>)}
       </select>
     </label>
   );
+}
+
+function TextField({ label, value, setValue, type = "text", icon }: { label: string; value: string; setValue: (value: string) => void; type?: string; icon?: ReactNode }) {
+  return (
+    <label className="block">
+      <span className="flex items-center gap-2 text-sm font-medium">{icon}{label}</span>
+      <input type={type} value={value} onChange={(event) => setValue(event.target.value)} className="mt-2 w-full rounded-md border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal focus:ring-2 focus:ring-tealL" />
+    </label>
+  );
+}
+
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button onClick={onClick} className={`border-b-2 px-4 py-3 text-sm font-medium ${active ? "border-teal text-ink" : "border-transparent text-slate-500 hover:text-ink"}`}>
+      {children}
+    </button>
+  );
+}
+
+function StatusBadge({ tone, children }: { tone: "green" | "amber" | "red" | "slate"; children: ReactNode }) {
+  const colors = {
+    green: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+    amber: "bg-amber-50 text-amber-700 ring-amber-200",
+    red: "bg-red-50 text-red-700 ring-red-200",
+    slate: "bg-slate-50 text-slate-600 ring-slate-200",
+  };
+  return <span className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${colors[tone]}`}>{children}</span>;
 }
 
 function ConceptGraphic({ active }: { active: boolean }) {
@@ -633,51 +862,21 @@ function ConceptGraphic({ active }: { active: boolean }) {
   );
 }
 
-function QualityPanel({ report }: { report: QualityReport }) {
-  const rows = [
-    ...Object.entries(report.technical_checks).map(([key, value]) => [key, value, "Technical"] as const),
-    ...Object.entries(report.commercial_checks).map(([key, value]) => [key, value, "Commercial"] as const),
-  ];
+function EmptyState({ title, text }: { title: string; text: string }) {
   return (
-    <div className={`rounded-md border p-3 ${report.passed ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
-      <p className="font-medium">{report.passed ? "QA passed" : "QA needs attention"}</p>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        {rows.map(([key, value, group]) => (
-          <div key={`${group}-${key}`} className="flex items-center justify-between rounded bg-white/70 px-3 py-2 text-sm">
-            <span>{key.replaceAll("_", " ")}</span>
-            <span>{value ? "Pass" : "Fix"}</span>
-          </div>
-        ))}
-      </div>
-      {report.recommendations.length ? <ul className="mt-3 list-disc pl-5 text-sm">{report.recommendations.map((item) => <li key={item}>{item}</li>)}</ul> : null}
-    </div>
-  );
-}
-
-function EmptyState({ icon, title, text }: { icon: ReactNode; title: string; text: string }) {
-  return (
-    <div className="flex min-h-40 flex-col items-center justify-center rounded-md border border-dashed border-line bg-mist p-6 text-center">
-      <div className="text-slate-400">{icon}</div>
+    <div className="flex min-h-64 flex-col items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+      <FileVideo className="text-slate-400" />
       <p className="mt-3 font-medium">{title}</p>
       <p className="mt-1 max-w-md text-sm text-slate-500">{text}</p>
     </div>
   );
 }
 
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md bg-mist p-3">
-      <dt className="text-xs text-slate-500">{label}</dt>
-      <dd className="mt-1 break-all font-medium">{value}</dd>
-    </div>
-  );
-}
-
 function StatusPill({ status }: { status: Job["status"] }) {
-  const color = status === "completed" ? "bg-emerald-100 text-emerald-800" : status === "failed" ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800";
-  return <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${color}`}>{status}</span>;
+  const color = status === "completed" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : status === "failed" ? "bg-red-50 text-red-700 ring-red-200" : "bg-amber-50 text-amber-700 ring-amber-200";
+  return <span className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${color}`}>{status}</span>;
 }
 
 function ErrorText({ error }: { error: Error }) {
-  return <p className="rounded-md bg-red-50 p-3 text-sm text-red-800">{error.message}</p>;
+  return <p className="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-800">{error.message}</p>;
 }
