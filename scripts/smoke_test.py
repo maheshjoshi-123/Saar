@@ -17,6 +17,8 @@ os.environ.setdefault("ADMIN_AUTH_TOKEN", "smoke-admin-token")
 from fastapi.testclient import TestClient  # noqa: E402
 from apps.api.app.main import app  # noqa: E402
 from apps.api.app.db import engine  # noqa: E402
+from apps.api.app.tasks import extract_output_url  # noqa: E402
+from apps.api.app.workflows import inspect_workflow_template  # noqa: E402
 
 
 def main() -> None:
@@ -50,6 +52,11 @@ def main() -> None:
         models = client.get("/api/models", headers=headers)
         assert models.status_code == 200, models.text
         assert any(item["key"] == "wan22_t2v" for item in models.json()), models.text
+
+        workflow_inspection = inspect_workflow_template("wan22_t2v.json")
+        assert workflow_inspection["exists"], workflow_inspection
+        assert workflow_inspection["valid_json"], workflow_inspection
+        assert workflow_inspection["node_count"] >= 1, workflow_inspection
 
         estimate = client.post(
             "/api/jobs/estimate",
@@ -190,6 +197,14 @@ def main() -> None:
             json={"job_id": job["id"], "approved": False, "rating": 3, "approved_patterns": ["muted palette"], "rejected_patterns": ["camera too fast"]},
         )
         assert feedback.status_code == 200, feedback.text
+
+        usage = client.get("/api/admin/usage/summary", headers=admin_headers)
+        assert usage.status_code == 200, usage.text
+        assert usage.json()["total_jobs"] >= 1, usage.text
+        assert usage.json()["jobs_by_model"].get("wan22_t2v", 0) >= 1, usage.text
+
+        assert extract_output_url({"images": [{"filename": "x.png", "type": "s3_url", "data": "https://cdn.example.com/x.png"}]}) == "https://cdn.example.com/x.png"
+        assert extract_output_url({"videos": [{"filename": "x.mp4", "type": "s3_url", "data": "https://cdn.example.com/x.mp4"}]}) == "https://cdn.example.com/x.mp4"
 
         invalid = client.post(
             "/api/jobs",

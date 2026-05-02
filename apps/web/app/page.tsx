@@ -31,6 +31,7 @@ import {
   PromptVersion,
   QualityReport,
   TaskType,
+  UsageSummary,
   userHeaders,
   Wallet,
   uploadAsset,
@@ -117,6 +118,12 @@ export default function Home() {
     queryKey: ["wallet", userId, userToken],
     queryFn: () => api<Wallet>(`/api/billing/wallet?user_id=${encodeURIComponent(userId)}`, { headers: scopedHeaders }),
     enabled: Boolean(userId),
+  });
+
+  const usage = useQuery({
+    queryKey: ["usage", adminKey],
+    queryFn: () => api<UsageSummary>("/api/admin/usage/summary", { headers: { "x-saar-admin-key": adminKey } }),
+    enabled: Boolean(adminKey),
   });
 
   const estimate = useQuery({
@@ -444,7 +451,7 @@ export default function Home() {
         <aside className="space-y-5">
           <BillingPanel pricing={pricing.data || []} wallet={wallet.data} estimate={cost} couponCode={couponCode} setCouponCode={setCouponCode} redeemCoupon={() => redeemCoupon.mutate()} redeemPending={redeemCoupon.isPending} redeemError={redeemCoupon.error as Error | null} />
           <OutputPanel active={active} promptVersion={promptVersion.data} qualityReport={qualityReport} generateQa={() => generateQa.mutate()} qaPending={generateQa.isPending} revisionText={revisionText} setRevisionText={setRevisionText} createRevision={() => createRevision.mutate()} revisionPending={createRevision.isPending} sendFeedback={sendFeedback.mutate} feedbackPending={sendFeedback.isPending} />
-          <AdminPanel adminKey={adminKey} setAdminKey={setAdminKey} adminGrantAmount={adminGrantAmount} setAdminGrantAmount={setAdminGrantAmount} grantCredits={() => grantCredits.mutate()} grantPending={grantCredits.isPending} grantError={grantCredits.error as Error | null} pricing={pricing.data || []} adminPlanKey={adminPlanKey} setAdminPlanKey={setAdminPlanKey} subscribePlan={() => subscribePlan.mutate()} subscribePending={subscribePlan.isPending} subscribeError={subscribePlan.error as Error | null} adminCouponCode={adminCouponCode} setAdminCouponCode={setAdminCouponCode} adminCouponCredits={adminCouponCredits} setAdminCouponCredits={setAdminCouponCredits} createCoupon={() => createCoupon.mutate()} couponPending={createCoupon.isPending} couponError={createCoupon.error as Error | null} createdCoupon={createCoupon.data} />
+          <AdminPanel adminKey={adminKey} setAdminKey={setAdminKey} usage={usage.data} usageError={usage.error as Error | null} adminGrantAmount={adminGrantAmount} setAdminGrantAmount={setAdminGrantAmount} grantCredits={() => grantCredits.mutate()} grantPending={grantCredits.isPending} grantError={grantCredits.error as Error | null} pricing={pricing.data || []} adminPlanKey={adminPlanKey} setAdminPlanKey={setAdminPlanKey} subscribePlan={() => subscribePlan.mutate()} subscribePending={subscribePlan.isPending} subscribeError={subscribePlan.error as Error | null} adminCouponCode={adminCouponCode} setAdminCouponCode={setAdminCouponCode} adminCouponCredits={adminCouponCredits} setAdminCouponCredits={setAdminCouponCredits} createCoupon={() => createCoupon.mutate()} couponPending={createCoupon.isPending} couponError={createCoupon.error as Error | null} createdCoupon={createCoupon.data} />
         </aside>
       </div>
     </main>
@@ -604,12 +611,19 @@ function OutputPanel({ active, promptVersion, qualityReport, generateQa, qaPendi
   );
 }
 
-function AdminPanel({ adminKey, setAdminKey, adminGrantAmount, setAdminGrantAmount, grantCredits, grantPending, grantError, pricing, adminPlanKey, setAdminPlanKey, subscribePlan, subscribePending, subscribeError, adminCouponCode, setAdminCouponCode, adminCouponCredits, setAdminCouponCredits, createCoupon, couponPending, couponError, createdCoupon }: { adminKey: string; setAdminKey: (value: string) => void; adminGrantAmount: number; setAdminGrantAmount: (value: number) => void; grantCredits: () => void; grantPending: boolean; grantError: Error | null; pricing: PricingPlan[]; adminPlanKey: string; setAdminPlanKey: (value: string) => void; subscribePlan: () => void; subscribePending: boolean; subscribeError: Error | null; adminCouponCode: string; setAdminCouponCode: (value: string) => void; adminCouponCredits: number; setAdminCouponCredits: (value: number) => void; createCoupon: () => void; couponPending: boolean; couponError: Error | null; createdCoupon?: Coupon }) {
+function AdminPanel({ adminKey, setAdminKey, usage, usageError, adminGrantAmount, setAdminGrantAmount, grantCredits, grantPending, grantError, pricing, adminPlanKey, setAdminPlanKey, subscribePlan, subscribePending, subscribeError, adminCouponCode, setAdminCouponCode, adminCouponCredits, setAdminCouponCredits, createCoupon, couponPending, couponError, createdCoupon }: { adminKey: string; setAdminKey: (value: string) => void; usage?: UsageSummary; usageError: Error | null; adminGrantAmount: number; setAdminGrantAmount: (value: number) => void; grantCredits: () => void; grantPending: boolean; grantError: Error | null; pricing: PricingPlan[]; adminPlanKey: string; setAdminPlanKey: (value: string) => void; subscribePlan: () => void; subscribePending: boolean; subscribeError: Error | null; adminCouponCode: string; setAdminCouponCode: (value: string) => void; adminCouponCredits: number; setAdminCouponCredits: (value: number) => void; createCoupon: () => void; couponPending: boolean; couponError: Error | null; createdCoupon?: Coupon }) {
   return (
     <details className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <summary className="cursor-pointer list-none text-sm font-semibold text-slate-700">Admin</summary>
       <div className="mt-4 space-y-3">
         <TextField label="Admin key" value={adminKey} setValue={setAdminKey} type="password" />
+        {usage ? (
+          <div className="grid grid-cols-3 gap-2">
+            <Metric label="Jobs" value={`${usage.total_jobs}`} />
+            <Metric label="Failed" value={`${usage.failed_jobs}`} />
+            <Metric label="Spent" value={`${usage.total_credits_spent}`} />
+          </div>
+        ) : null}
         <div className="grid grid-cols-[1fr_auto] gap-2">
           <input type="number" value={adminGrantAmount} onChange={(event) => setAdminGrantAmount(Number(event.target.value))} className="rounded-md border border-slate-200 px-3 py-2 text-sm" />
           <button onClick={grantCredits} disabled={grantPending} className="inline-flex items-center gap-2 rounded-md bg-[#111827] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"><Coins size={15} /> Grant</button>
@@ -627,6 +641,7 @@ function AdminPanel({ adminKey, setAdminKey, adminGrantAmount, setAdminGrantAmou
         <button onClick={createCoupon} disabled={couponPending || !adminCouponCode} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-slate-200 text-sm font-medium disabled:opacity-50"><BadgePercent size={15} /> Create coupon</button>
         {createdCoupon ? <p className="rounded-md bg-emerald-50 p-2 text-sm text-emerald-800">{createdCoupon.code} active</p> : null}
         {grantError ? <ErrorText error={grantError} /> : null}
+        {usageError ? <ErrorText error={usageError} /> : null}
         {subscribeError ? <ErrorText error={subscribeError} /> : null}
         {couponError ? <ErrorText error={couponError} /> : null}
       </div>

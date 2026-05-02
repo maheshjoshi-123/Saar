@@ -3,6 +3,7 @@ from sqlalchemy import text
 from .config import Settings, get_settings
 from .db import engine
 from .router import ENV_DEFAULTS
+from .workflows import inspect_workflow_template
 
 
 PLACEHOLDER_MARKER = "_description"
@@ -47,10 +48,16 @@ def check_preflight(settings: Settings | None = None) -> dict:
     add("workflow_files", not missing_workflows, "Missing " + ", ".join(missing_workflows) if missing_workflows else "Workflow files present")
 
     placeholder_files = []
+    invalid_workflows = []
     for path in workflow_files:
         if path.exists() and PLACEHOLDER_MARKER in path.read_text(encoding="utf-8", errors="ignore"):
             placeholder_files.append(path.name)
+        if path.exists():
+            inspection = inspect_workflow_template(path.name)
+            if not inspection["valid_json"] or inspection["node_count"] == 0:
+                invalid_workflows.append(path.name)
     add("real_workflows", not placeholder_files, "Replace placeholder workflows: " + ", ".join(placeholder_files) if placeholder_files else "Workflow files do not contain placeholder marker")
+    add("workflow_contract", not invalid_workflows, "Invalid workflow contract: " + ", ".join(invalid_workflows) if invalid_workflows else "Workflow JSON files are parseable API graphs")
 
     try:
         with engine.connect() as conn:

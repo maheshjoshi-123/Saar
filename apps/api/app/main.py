@@ -15,7 +15,7 @@ from .models import AssurancePlan, AssuranceStatus, Asset, AssetType, Coupon, Cr
 from .preflight import check_preflight
 from .r2 import presign_put, public_url_for_key
 from .router import list_available_endpoints, resolve_endpoint
-from .schemas import AssurancePlanResponse, ConfirmAssuranceRequest, ContextPreviewRequest, ContextPreviewResponse, CostEstimateRequest, CostEstimateResponse, CouponIn, CouponOut, CreditGrantRequest, CreateJobRequest, DesireIntakeRequest, FeedbackIn, JobEventResponse, JobResponse, LedgerResponse, MemoryItemIn, MemoryItemOut, ModelEndpointIn, ModelEndpointOut, PlanSubscribeRequest, PresignUploadRequest, PresignUploadResponse, PricingPlanIn, PricingPlanOut, PromptVersionResponse, QualityReportResponse, RedeemCouponRequest, RevisionRequestIn, RevisionRequestOut, UserTokenRequest, UserTokenResponse, WalletResponse
+from .schemas import AssurancePlanResponse, ConfirmAssuranceRequest, ContextPreviewRequest, ContextPreviewResponse, CostEstimateRequest, CostEstimateResponse, CouponIn, CouponOut, CreditGrantRequest, CreateJobRequest, DesireIntakeRequest, FeedbackIn, JobEventResponse, JobResponse, LedgerResponse, MemoryItemIn, MemoryItemOut, ModelEndpointIn, ModelEndpointOut, PlanSubscribeRequest, PresignUploadRequest, PresignUploadResponse, PricingPlanIn, PricingPlanOut, PromptVersionResponse, QualityReportResponse, RedeemCouponRequest, RevisionRequestIn, RevisionRequestOut, UsageSummaryResponse, UserTokenRequest, UserTokenResponse, WalletResponse
 from .security import require_admin_token, require_api_token, require_user_scope, sign_user_token
 from .tasks import process_job
 
@@ -398,6 +398,32 @@ def get_billing_wallet(user_id: str, db: Session = Depends(get_db), x_saar_user_
 def get_billing_ledger(user_id: str, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> list[CreditLedger]:
     _scoped_user(user_id, x_saar_user_id, x_saar_user_token)
     return list(db.execute(select(CreditLedger).where(CreditLedger.user_id == user_id).order_by(CreditLedger.created_at.desc()).limit(100)).scalars().all())
+
+
+@app.get("/api/admin/usage/summary", response_model=UsageSummaryResponse, dependencies=[Depends(require_admin_token)])
+def admin_usage_summary(db: Session = Depends(get_db)) -> UsageSummaryResponse:
+    jobs = list(db.execute(select(Job).order_by(Job.created_at.desc()).limit(10000)).scalars().all())
+    ledger = list(db.execute(select(CreditLedger).order_by(CreditLedger.created_at.desc()).limit(10000)).scalars().all())
+    jobs_by_task: dict[str, int] = {}
+    jobs_by_model: dict[str, int] = {}
+    credits_by_user: dict[str, int] = {}
+    for job in jobs:
+        jobs_by_task[job.task_type.value] = jobs_by_task.get(job.task_type.value, 0) + 1
+        jobs_by_model[job.model_key or "auto"] = jobs_by_model.get(job.model_key or "auto", 0) + 1
+    for row in ledger:
+        if row.type == LedgerType.debit:
+            credits_by_user[row.user_id] = credits_by_user.get(row.user_id, 0) + abs(row.amount)
+    return UsageSummaryResponse(
+        total_jobs=len(jobs),
+        completed_jobs=sum(1 for job in jobs if job.status == JobStatus.completed),
+        failed_jobs=sum(1 for job in jobs if job.status == JobStatus.failed),
+        running_jobs=sum(1 for job in jobs if job.status in {JobStatus.queued, JobStatus.running, JobStatus.submitted, JobStatus.uploading}),
+        total_credits_spent=sum(abs(row.amount) for row in ledger if row.type == LedgerType.debit),
+        total_credits_granted=sum(row.amount for row in ledger if row.type in {LedgerType.grant, LedgerType.coupon}),
+        jobs_by_task=jobs_by_task,
+        jobs_by_model=jobs_by_model,
+        credits_by_user=credits_by_user,
+    )
 
 
 @app.post("/api/admin/billing/grant", response_model=WalletResponse, dependencies=[Depends(require_admin_token)])

@@ -158,6 +158,18 @@ class LedgerResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class UsageSummaryResponse(BaseModel):
+    total_jobs: int
+    completed_jobs: int
+    failed_jobs: int
+    running_jobs: int
+    total_credits_spent: int
+    total_credits_granted: int
+    jobs_by_task: dict
+    jobs_by_model: dict
+    credits_by_user: dict
+
+
 class DesireIntakeRequest(BaseModel):
     raw_idea: str = Field(min_length=1)
     user_id: str | None = None

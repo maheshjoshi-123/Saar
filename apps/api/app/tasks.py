@@ -165,6 +165,9 @@ def extract_output_url(output) -> str | None:
     if not isinstance(output, dict):
         return None
 
+    data = output.get("data")
+    if output.get("type") in {"s3_url", "url", "r2_url"} and isinstance(data, str) and data.startswith("http"):
+        return data
     for key in ("video_url", "url", "output_url"):
         value = output.get(key)
         if isinstance(value, str) and value.startswith("http"):

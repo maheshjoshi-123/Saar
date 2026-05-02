@@ -50,6 +50,18 @@ export type Wallet = {
   updated_at: string;
 };
 
+export type UsageSummary = {
+  total_jobs: number;
+  completed_jobs: number;
+  failed_jobs: number;
+  running_jobs: number;
+  total_credits_spent: number;
+  total_credits_granted: number;
+  jobs_by_task: Record<string, number>;
+  jobs_by_model: Record<string, number>;
+  credits_by_user: Record<string, number>;
+};
+
 export type CostEstimate = {
   required_credits: number;
   estimated_gpu_seconds: number;
