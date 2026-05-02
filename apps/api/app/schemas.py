@@ -4,10 +4,11 @@ from .models import AssuranceStatus, AssetType, JobStatus, LedgerType, MemoryTyp
 
 
 class PresignUploadRequest(BaseModel):
-    filename: str
-    content_type: str
+    filename: str = Field(min_length=1, max_length=240)
+    content_type: str = Field(min_length=1, max_length=120)
+    file_size: int | None = Field(default=None, ge=1)
     asset_type: AssetType = AssetType.image
-    user_id: str | None = None
+    user_id: str | None = Field(default=None, max_length=128, pattern=r"^[A-Za-z0-9_.@:-]+$")
 
 
 class PresignUploadResponse(BaseModel):
@@ -18,22 +19,22 @@ class PresignUploadResponse(BaseModel):
 
 
 class CreateJobRequest(BaseModel):
-    prompt: str = Field(min_length=1)
+    prompt: str = Field(min_length=1, max_length=12000)
     task_type: TaskType
-    negative_prompt: str | None = None
+    negative_prompt: str | None = Field(default=None, max_length=8000)
     input_asset_id: str | None = None
-    user_id: str | None = None
-    model_key: str | None = None
+    user_id: str | None = Field(default=None, max_length=128, pattern=r"^[A-Za-z0-9_.@:-]+$")
+    model_key: str | None = Field(default=None, max_length=80, pattern=r"^[A-Za-z0-9_.:-]+$")
     options: dict = Field(default_factory=dict)
 
 
 class CostEstimateRequest(BaseModel):
     task_type: TaskType
-    model_key: str | None = None
-    duration_seconds: int = 6
-    quality: str = "standard"
-    complexity_score: int | None = None
-    user_id: str | None = None
+    model_key: str | None = Field(default=None, max_length=80, pattern=r"^[A-Za-z0-9_.:-]+$")
+    duration_seconds: int = Field(default=6, ge=1, le=60)
+    quality: str = Field(default="standard", pattern="^(preview|standard|premium)$")
+    complexity_score: int | None = Field(default=None, ge=1, le=10)
+    user_id: str | None = Field(default=None, max_length=128, pattern=r"^[A-Za-z0-9_.@:-]+$")
 
 
 class CostEstimateResponse(BaseModel):
@@ -45,14 +46,14 @@ class CostEstimateResponse(BaseModel):
 
 
 class ContextPreviewRequest(BaseModel):
-    prompt: str = Field(min_length=1)
+    prompt: str = Field(min_length=1, max_length=12000)
     task_type: TaskType
-    negative_prompt: str | None = None
+    negative_prompt: str | None = Field(default=None, max_length=8000)
     input_asset_id: str | None = None
-    user_id: str | None = None
-    model_key: str | None = None
-    duration_seconds: int = 6
-    quality: str = "standard"
+    user_id: str | None = Field(default=None, max_length=128, pattern=r"^[A-Za-z0-9_.@:-]+$")
+    model_key: str | None = Field(default=None, max_length=80, pattern=r"^[A-Za-z0-9_.:-]+$")
+    duration_seconds: int = Field(default=6, ge=1, le=60)
+    quality: str = Field(default="standard", pattern="^(preview|standard|premium)$")
     options: dict = Field(default_factory=dict)
 
 
@@ -72,16 +73,17 @@ class ContextPreviewResponse(BaseModel):
 
 class IntelligencePacketRequest(BaseModel):
     route: str = Field(pattern="^(direct_video|generate_plan)$")
-    raw_prompt: str = Field(min_length=1)
-    user_id: str | None = None
-    project_id: str | None = None
+    raw_prompt: str = Field(min_length=1, max_length=12000)
+    user_id: str | None = Field(default=None, max_length=128, pattern=r"^[A-Za-z0-9_.@:-]+$")
+    project_id: str | None = Field(default=None, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$")
     settings: dict = Field(default_factory=dict)
-    scene_plan: list[dict] = Field(default_factory=list)
-    keyframes: list[dict] = Field(default_factory=list)
-    edit_scene_id: str | None = None
+    scene_plan: list[dict] = Field(default_factory=list, max_length=12)
+    keyframes: list[dict] = Field(default_factory=list, max_length=12)
+    edit_scene_id: str | None = Field(default=None, max_length=128)
     scene_patch: dict = Field(default_factory=dict)
-    edit_keyframe_id: str | None = None
+    edit_keyframe_id: str | None = Field(default=None, max_length=128)
     keyframe_patch: dict = Field(default_factory=dict)
+    charge_credits: bool = True
 
 
 class IntelligencePacketResponse(BaseModel):
@@ -91,15 +93,18 @@ class IntelligencePacketResponse(BaseModel):
     reference_images: list[dict]
     keyframes: list[dict] = Field(default_factory=list)
     final_video_prompt: str
+    required_credits: int = 0
+    debited_credits: int = 0
+    user_balance: int | None = None
 
 
 class PricingPlanIn(BaseModel):
-    key: str
-    name: str
-    price_npr: int = 0
-    credits: int
-    max_video_seconds: int = 6
-    max_jobs_per_month: int | None = None
+    key: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_.:-]+$")
+    name: str = Field(min_length=1, max_length=120)
+    price_npr: int = Field(default=0, ge=0)
+    credits: int = Field(ge=0, le=10_000_000)
+    max_video_seconds: int = Field(default=6, ge=1, le=120)
+    max_jobs_per_month: int | None = Field(default=None, ge=1, le=100_000)
     features: list[str] = Field(default_factory=list)
     is_active: bool = True
 
@@ -121,21 +126,34 @@ class WalletResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class CreditGrantRequest(BaseModel):
+class AuthSessionRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.@:-]+$")
+    name: str | None = Field(default=None, max_length=120)
+    mode: str = Field(default="login", pattern="^(login|signup)$")
+
+
+class AuthSessionResponse(BaseModel):
     user_id: str
-    amount: int = Field(gt=0)
-    reason: str = "admin grant"
+    token: str
+    name: str | None = None
+    demo: bool = True
+
+
+class CreditGrantRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.@:-]+$")
+    amount: int = Field(gt=0, le=10_000_000)
+    reason: str = Field(default="admin grant", max_length=240)
 
 
 class PlanSubscribeRequest(BaseModel):
-    user_id: str
-    plan_key: str
+    user_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.@:-]+$")
+    plan_key: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_.:-]+$")
     cycles: int = Field(default=1, ge=1, le=24)
-    payment_reference: str | None = None
+    payment_reference: str | None = Field(default=None, max_length=240)
 
 
 class UserTokenRequest(BaseModel):
-    user_id: str
+    user_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.@:-]+$")
 
 
 class UserTokenResponse(BaseModel):
@@ -144,11 +162,11 @@ class UserTokenResponse(BaseModel):
 
 
 class CouponIn(BaseModel):
-    code: str
-    description: str | None = None
-    credit_amount: int = Field(ge=0)
+    code: str = Field(min_length=3, max_length=48, pattern=r"^[A-Za-z0-9_-]+$")
+    description: str | None = Field(default=None, max_length=240)
+    credit_amount: int = Field(ge=0, le=1_000_000)
     percent_bonus: int = Field(default=0, ge=0, le=100)
-    max_redemptions: int | None = None
+    max_redemptions: int | None = Field(default=None, ge=1, le=1_000_000)
     expires_at: datetime | None = None
     is_active: bool = True
 
@@ -162,9 +180,9 @@ class CouponOut(CouponIn):
 
 
 class RedeemCouponRequest(BaseModel):
-    user_id: str
-    code: str
-    purchase_credits: int = 0
+    user_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.@:-]+$")
+    code: str = Field(min_length=3, max_length=48, pattern=r"^[A-Za-z0-9_-]+$")
+    purchase_credits: int = Field(default=0, ge=0, le=10_000_000)
 
 
 class LedgerResponse(BaseModel):

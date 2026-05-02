@@ -1,11 +1,13 @@
 import os
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///./saar_smoke.db")
+SMOKE_DB = Path(f"saar_smoke_{uuid4().hex}.db")
+os.environ["DATABASE_URL"] = f"sqlite:///./{SMOKE_DB.name}"
 os.environ.setdefault("QUEUE_MODE", "inline")
 os.environ.setdefault("RUNPOD_MOCK", "true")
 os.environ.setdefault("WORKFLOW_DIR", "workflows")
@@ -13,6 +15,7 @@ os.environ.setdefault("SECRET_KEY", "smoke-secret")
 os.environ.setdefault("INTERNAL_CALLBACK_TOKEN", "smoke-callback")
 os.environ.setdefault("API_AUTH_TOKEN", "smoke-api-token")
 os.environ.setdefault("ADMIN_AUTH_TOKEN", "smoke-admin-token")
+os.environ.setdefault("OLLAMA_ENABLED", "false")
 
 from fastapi.testclient import TestClient  # noqa: E402
 from apps.api.app.main import app  # noqa: E402
@@ -22,7 +25,7 @@ from apps.api.app.workflows import inspect_workflow_template  # noqa: E402
 
 
 def main() -> None:
-    db_file = Path("saar_smoke.db")
+    db_file = SMOKE_DB
     engine.dispose()
     if db_file.exists():
         try:
@@ -82,6 +85,14 @@ def main() -> None:
         assert subscription.status_code == 200, subscription.text
         assert subscription.json()["balance"] == 420, subscription.text
 
+        user_subscription = client.post(
+            "/api/billing/subscribe",
+            headers=headers,
+            json={"user_id": "smoke-user", "plan_key": "creator", "cycles": 1, "payment_reference": "smoke-ui"},
+        )
+        assert user_subscription.status_code == 200, user_subscription.text
+        assert user_subscription.json()["balance"] == 870, user_subscription.text
+
         coupon = client.post(
             "/api/admin/coupons",
             headers=admin_headers,
@@ -95,7 +106,7 @@ def main() -> None:
             json={"user_id": "smoke-user", "code": "SMOKE50"},
         )
         assert redeemed.status_code == 200, redeemed.text
-        assert redeemed.json()["balance"] == 470, redeemed.text
+        assert redeemed.json()["balance"] == 920, redeemed.text
 
         memory = client.post(
             "/api/memory",

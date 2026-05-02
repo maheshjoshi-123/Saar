@@ -1,0 +1,182 @@
+{
+  "approved_plan": {
+    "scenes": [
+      {
+        "scene_number": 1,
+        "id": "scene-1",
+        "title": "Warm Grey Curved-Brim Cap on Kathmandu Rooftop",
+        "duration": "3 sec",
+        "visual_description": "Start tighter on the cap texture and front embroidery, keeping the rooftop softly blurred.",
+        "camera": "Slow dolly-in from the front of the subject towards the camera, then back out again for continuity",
+        "motion": "Smooth, slow motion",
+        "lighting": "Soft natural lighting with a slight ambient glow from the sun reflecting off the cap and the cityscape",
+        "subject_action": "Model holds still; no hand crosses the logo area.",
+        "continuity_anchors": [
+          "same warm grey curved-brim cap colour throughout",
+          "same logo shape and placement throughout",
+          "same lighting direction throughout",
+          "same background layout throughout",
+          "preserve warm grey curved-brim cap colour",
+          "preserve logo shape and placement",
+          "Avoid shaky camera",
+          "Avoid cartoonish visuals"
+        ],
+        "reference_image_prompt": "Luxury Natural reference keyframe for Facebook Reel: warm grey curved-brim cap in Kathmandu rooftop, aspirational urban lifestyle, warm grey curved-brim cap on kathmandu rooftop. Start tighter on the cap texture and front embroidery, keeping the rooftop softly blurred. Clean commercial composition, soft natural light, muted neutral colour grade, product-first framing.",
+        "negative_prompt": "Avoid shaky camera, Avoid cartoonish visuals, Avoid over-saturated colours, Avoid distorted logos, Avoid random text appearing in video",
+        "local_model": "ollama",
+        "status": "approved"
+      },
+      {
+        "scene_number": 2,
+        "id": "scene-2",
+        "title": "Warm Grey Curved-Brim Cap on Kathmandu Rooftop (continued)",
+        "duration": "3 sec",
+        "visual_description": "The warm grey curved-brim cap is shown again from a slightly different angle, emphasizing its shape and texture. The camera then pans out to show the entire scene with more detail.",
+        "camera": "Slow dolly-in from the front of the subject towards the camera, then back out for continuity",
+        "motion": "Smooth, slow motion",
+        "lighting": "Soft natural lighting with a slight ambient glow from the sun reflecting off the cap and the cityscape",
+        "subject_action": "The warm grey curved-brim cap is shown in close-up detail, emphasizing its shape and texture. The camera then pans out to show it sitting on the rooftop.",
+        "continuity_anchors": [
+          "same warm grey curved-brim cap colour throughout",
+          "same logo shape and placement throughout",
+          "same lighting direction throughout",
+          "same background layout throughout",
+          "preserve warm grey curved-brim cap colour",
+          "preserve logo shape and placement",
+          "Avoid shaky camera",
+          "Avoid cartoonish visuals"
+        ],
+        "reference_image_prompt": "A high-resolution image of a warm grey curved-brim cap on a Kathmandu rooftop with the cityscape visible in the background",
+        "negative_prompt": "No shaky camera movements, no random text or elements appearing in the video, no over-saturated colors, no distorted logos",
+        "local_model": "ollama",
+        "status": "approved"
+      }
+    ]
+  },
+  "approved_keyframes": [
+    {
+      "keyframe_id": "keyframe-1",
+      "scene_id": "scene-1",
+      "timestamp": "0s",
+      "description": "Opening product/subject frame: Start tighter on the cap texture and front embroidery, keeping the rooftop softly blurred.",
+      "image_prompt": "9:16 reference keyframe, Luxury Natural commercial image. Opening product/subject frame: Start tighter on the cap texture and front embroidery, keeping the rooftop softly blurred.. Scene: Warm Grey Curved-Brim Cap on Kathmandu Rooftop. Camera: Slow dolly-in from the front of the subject towards the camera, then back out again for continuity. Lighting: Soft natural lighting with a slight ambient glow from the sun reflecting off the cap and the cityscape. World: Kathmandu rooftop, aspirational urban lifestyle. Preserve product identity, colour, shape, logo placement, material texture, clean mobile-first framing, no extra text. Add cleaner golden-hour side light and sharper cotton twill texture.",
+      "negative_prompt": "Avoid shaky camera, Avoid cartoonish visuals, Avoid over-saturated colours, Avoid distorted logos, Avoid random text appearing in video",
+      "status": "approved",
+      "image_path": "/local-placeholders/reference-keyframe-1-revised.svg",
+      "history": [
+        {
+          "description": "Opening product/subject frame: A warm grey curved-brim cap sits elegantly atop a Kathmandu rooftop, with the cityscape in the background. The camera pans slowly around the scene to showcase the product's placement and surroundings.",
+          "image_prompt": "9:16 reference keyframe, Luxury Natural commercial image. Opening product/subject frame: A warm grey curved-brim cap sits elegantly atop a Kathmandu rooftop, with the cityscape in the background. The camera pans slowly around the scene to showcase the product's placement and surroundings.. Scene: Warm Grey Curved-Brim Cap on Kathmandu Rooftop. Camera: Slow dolly-in from the front of the subject towards the camera, then back out again for continuity. Lighting: Soft natural lighting with a slight ambient glow from the sun reflecting off the cap and the cityscape. World: Kathmandu rooftop, aspirational urban lifestyle. Preserve product identity, colour, shape, logo placement, material texture, clean mobile-first framing, no extra text.",
+          "negative_prompt": "No shaky camera movements, no random text or elements appearing in the video, no over-saturated colors, no distorted logos",
+          "image_path": "/local-placeholders/reference-keyframe-1.svg",
+          "status": "draft"
+        },
+        {
+          "description": "Opening product/subject frame: Start tighter on the cap texture and front embroidery, keeping the rooftop softly blurred.",
+          "image_prompt": "9:16 reference keyframe, Luxury Natural commercial image. Opening product/subject frame: Start tighter on the cap texture and front embroidery, keeping the rooftop softly blurred.. Scene: Warm Grey Curved-Brim Cap on Kathmandu Rooftop. Camera: Slow dolly-in from the front of the subject towards the camera, then back out again for continuity. Lighting: Soft natural lighting with a slight ambient glow from the sun reflecting off the cap and the cityscape. World: Kathmandu rooftop, aspirational urban lifestyle. Preserve product identity, colour, shape, logo placement, material texture, clean mobile-first framing, no extra text.",
+          "negative_prompt": "Avoid shaky camera, Avoid cartoonish visuals, Avoid over-saturated colours, Avoid distorted logos, Avoid random text appearing in video",
+          "image_path": "/local-placeholders/reference-keyframe-1.svg",
+          "status": "revised"
+        }
+      ]
+    },
+    {
+      "keyframe_id": "keyframe-2",
+      "scene_id": "scene-2",
+      "timestamp": "3s",
+      "description": "Main action frame: The warm grey curved-brim cap is shown in close-up detail, emphasizing its shape and texture. The camera then pans out to show it sitting on the rooftop.",
+      "image_prompt": "9:16 reference keyframe, Luxury Natural commercial image. Main action frame: The warm grey curved-brim cap is shown in close-up detail, emphasizing its shape and texture. The camera then pans out to show it sitting on the rooftop.. Scene: Warm Grey Curved-Brim Cap on Kathmandu Rooftop (continued). Camera: Slow dolly-in from the front of the subject towards the camera, then back out for continuity. Lighting: Soft natural lighting with a slight ambient glow from the sun reflecting off the cap and the cityscape. World: Kathmandu rooftop, aspirational urban lifestyle. Preserve product identity, colour, shape, logo placement, material texture, clean mobile-first framing, no extra text.",
+      "negative_prompt": "No shaky camera movements, no random text or elements appearing in the video, no over-saturated colors, no distorted logos",
+      "status": "approved",
+      "image_path": "/local-placeholders/reference-keyframe-2.svg",
+      "history": []
+    },
+    {
+      "keyframe_id": "keyframe-3",
+      "scene_id": "scene-2",
+      "timestamp": "6s",
+      "description": "Final hero/CTA-ready frame: The warm grey curved-brim cap is shown again from a slightly different angle, emphasizing its shape and texture. The camera then pans out to show the entire scene with more detail.",
+      "image_prompt": "9:16 reference keyframe, Luxury Natural commercial image. Final hero/CTA-ready frame: The warm grey curved-brim cap is shown again from a slightly different angle, emphasizing its shape and texture. The camera then pans out to show the entire scene with more detail.. Scene: Warm Grey Curved-Brim Cap on Kathmandu Rooftop (continued). Camera: Slow dolly-in from the front of the subject towards the camera, then back out for continuity. Lighting: Soft natural lighting with a slight ambient glow from the sun reflecting off the cap and the cityscape. World: Kathmandu rooftop, aspirational urban lifestyle. Preserve product identity, colour, shape, logo placement, material texture, clean mobile-first framing, no extra text.",
+      "negative_prompt": "No shaky camera movements, no random text or elements appearing in the video, no over-saturated colors, no distorted logos",
+      "status": "approved",
+      "image_path": "/local-placeholders/reference-keyframe-3.svg",
+      "history": []
+    }
+  ],
+  "reference_image_paths": [
+    "/local-placeholders/reference-keyframe-1-revised.svg",
+    "/local-placeholders/reference-keyframe-2.svg",
+    "/local-placeholders/reference-keyframe-3.svg"
+  ],
+  "final_prompt": "9:16 6-second Facebook Reel video. Objective: Make a premium Facebook Reel ad for a warm grey curved-brim cap on a Kathmandu rooftop. Hero subject: warm grey curved-brim cap; lock its colour, shape, logo/mark placement, material feel, and readable details throughout. Visual style: Luxury Natural commercial realism for young urban Nepalese consumers. World: Kathmandu rooftop, aspirational urban lifestyle. Camera: slow stable dolly-in with no shake; 35mm lens; clean product-first framing. Lighting: soft natural directional light with muted neutral colour grade. Motion: one controlled subject action only; avoid crossing hands over key logo/details. Continuity: same subject identity, same lighting direction, same background layout, no flicker. Preferred patterns: slow dolly-in, muted neutral colour grade, premium product close-up. Hard constraints: preserve warm grey curved-brim cap colour; preserve logo shape and placement; Avoid shaky camera; Avoid cartoonish visuals; Avoid over-saturated colours; Avoid distorted logos. Scene plan: Scene 1: Start tighter on the cap texture and front embroidery, keeping the rooftop softly blurred. Camera: Slow dolly-in from the front of the subject towards the camera, then back out again for continuity. Motion: Smooth, slow motion. Lighting: Soft natural lighting with a slight ambient glow from the sun reflecting off the cap and the cityscape. Scene 2: The warm grey curved-brim cap is shown again from a slightly different angle, emphasizing its shape and texture. The camera then pans out to show the entire scene with more detail. Camera: Slow dolly-in from the front of the subject towards the camera, then back out for continuity. Motion: Smooth, slow motion. Lighting: Soft natural lighting with a slight ambient glow from the sun reflecting off the cap and the cityscape. Negative constraints: Avoid shaky camera, Avoid cartoonish visuals, Avoid over-saturated colours, Avoid distorted logos, Avoid random text appearing in video.",
+  "memory": {
+    "user_id": "demo-user",
+    "long_term_preferences": {
+      "preferred_style": "Luxury",
+      "preferred_pace": "Slow",
+      "preferred_realism": "Natural",
+      "preferred_platform": "Facebook Reel",
+      "preferred_audience": "young urban Nepalese consumers"
+    },
+    "brand_rules": [
+      "Use clean, premium, realistic visuals",
+      "Avoid cluttered backgrounds",
+      "Prefer soft natural lighting",
+      "Use Nepal urban context when relevant"
+    ],
+    "negative_preferences": [
+      "Avoid shaky camera",
+      "Avoid cartoonish visuals",
+      "Avoid over-saturated colours",
+      "Avoid distorted logos",
+      "Avoid random text appearing in video"
+    ],
+    "failure_memory": [
+      {
+        "issue": "Logo distortion during motion",
+        "fix": "Keep camera movement slow and avoid hand crossing the logo area"
+      }
+    ],
+    "approved_patterns": [
+      "slow dolly-in",
+      "muted neutral colour grade",
+      "premium product close-up"
+    ]
+  },
+  "context": {
+    "active_project": "premium short-form product advert",
+    "hero_subject": "warm grey curved-brim cap",
+    "platform": "Facebook Reel",
+    "audience": "young urban Nepalese consumers",
+    "visual_world": "Kathmandu rooftop, aspirational urban lifestyle",
+    "style": "Luxury, Natural realism, slow pace",
+    "hard_constraints": [
+      "preserve warm grey curved-brim cap colour",
+      "preserve logo shape and placement",
+      "Avoid shaky camera",
+      "Avoid cartoonish visuals",
+      "Avoid over-saturated colours",
+      "Avoid distorted logos",
+      "Avoid random text appearing in video",
+      "Keep camera movement slow and avoid hand crossing the logo area"
+    ]
+  },
+  "negative_constraints": [
+    "Avoid shaky camera",
+    "Avoid cartoonish visuals",
+    "Avoid over-saturated colours",
+    "Avoid distorted logos",
+    "Avoid random text appearing in video"
+  ],
+  "continuity_rules": [
+    "preserve warm grey curved-brim cap colour",
+    "preserve logo shape and placement",
+    "Avoid shaky camera",
+    "Avoid cartoonish visuals",
+    "Avoid over-saturated colours",
+    "Avoid distorted logos",
+    "Avoid random text appearing in video",
+    "Keep camera movement slow and avoid hand crossing the logo area"
+  ],
+  "ready_for_video_generator": true
+}

@@ -2,14 +2,15 @@ import uuid
 from datetime import datetime
 from pathlib import PurePath
 from contextlib import asynccontextmanager
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from .config import get_settings
 from .db import get_db, init_db
 from .assurance import build_options_from_assurance, confirm_assurance_plan, create_assurance_plan, create_quality_report, create_revision_request, store_feedback_memory
-from .billing import add_credits, debit_credits, estimate_generation_cost, get_wallet, redeem_coupon, refund_credits, seed_default_plans
+from .billing import add_credits, debit_credits, estimate_generation_cost, get_wallet, redeem_coupon, refund_credits, seed_default_plans, seed_test_coupons
 from .context_compiler import compile_generation_context
 from .generation_packet import build_generation_packet
 from .intelligence_memory import retrieve_structured_memory
@@ -18,8 +19,8 @@ from .preflight import check_preflight
 from .prompt_refinement import build_intelligence_inputs
 from .r2 import presign_put, public_url_for_key
 from .router import list_available_endpoints, resolve_endpoint
-from .schemas import AssurancePlanResponse, ConfirmAssuranceRequest, ContextPreviewRequest, ContextPreviewResponse, CostEstimateRequest, CostEstimateResponse, CouponIn, CouponOut, CreditGrantRequest, CreateJobRequest, DesireIntakeRequest, FeedbackIn, IntelligencePacketRequest, IntelligencePacketResponse, JobEventResponse, JobResponse, LedgerResponse, MemoryItemIn, MemoryItemOut, ModelEndpointIn, ModelEndpointOut, PlanSubscribeRequest, PresignUploadRequest, PresignUploadResponse, PricingPlanIn, PricingPlanOut, PromptVersionResponse, QualityReportResponse, RedeemCouponRequest, RevisionRequestIn, RevisionRequestOut, UsageSummaryResponse, UserTokenRequest, UserTokenResponse, WalletResponse
-from .security import require_admin_token, require_api_token, require_user_scope, sign_user_token
+from .schemas import AssurancePlanResponse, AuthSessionRequest, AuthSessionResponse, ConfirmAssuranceRequest, ContextPreviewRequest, ContextPreviewResponse, CostEstimateRequest, CostEstimateResponse, CouponIn, CouponOut, CreditGrantRequest, CreateJobRequest, DesireIntakeRequest, FeedbackIn, IntelligencePacketRequest, IntelligencePacketResponse, JobEventResponse, JobResponse, LedgerResponse, MemoryItemIn, MemoryItemOut, ModelEndpointIn, ModelEndpointOut, PlanSubscribeRequest, PresignUploadRequest, PresignUploadResponse, PricingPlanIn, PricingPlanOut, PromptVersionResponse, QualityReportResponse, RedeemCouponRequest, RevisionRequestIn, RevisionRequestOut, UsageSummaryResponse, UserTokenRequest, UserTokenResponse, WalletResponse
+from .security import check_rate_limit, require_admin_token, require_api_token, require_user_scope, sign_user_token, validate_runtime_security
 from .tasks import process_job
 
 
@@ -28,12 +29,14 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_runtime_security()
     if settings.auto_create_tables:
         init_db()
         from .db import SessionLocal
         db = SessionLocal()
         try:
             seed_default_plans(db)
+            seed_test_coupons(db)
         finally:
             db.close()
     yield
@@ -48,6 +51,52 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def security_middleware(request: Request, call_next):
+    if settings.request_body_limit_bytes > 0:
+        content_length = request.headers.get("content-length")
+        try:
+            too_large = bool(content_length and int(content_length) > settings.request_body_limit_bytes)
+        except ValueError:
+            return JSONResponse({"detail": "Invalid Content-Length header"}, status_code=400)
+        if too_large:
+            return JSONResponse({"detail": "Request body too large"}, status_code=413)
+    try:
+        check_rate_limit(request)
+    except HTTPException as exc:
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+
+    response = await call_next(request)
+    if settings.security_headers_enabled:
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
+ALLOWED_UPLOAD_CONTENT_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "video/mp4",
+    "video/webm",
+    "audio/mpeg",
+    "audio/wav",
+    "application/pdf",
+    "text/plain",
+    "text/csv",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
 
 
 def _duration_from_options(options: dict) -> int:
@@ -95,14 +144,30 @@ def ready() -> dict:
     return check_preflight()
 
 
+@app.post("/api/auth/demo", response_model=AuthSessionResponse, dependencies=[Depends(require_api_token)])
+def demo_auth_session(body: AuthSessionRequest, db: Session = Depends(get_db)) -> AuthSessionResponse:
+    if not settings.demo_auth_enabled:
+        raise HTTPException(status_code=403, detail="Demo auth is disabled. Connect a real identity provider for production login.")
+    wallet = get_wallet(db, body.user_id, create=True)
+    # Give test users 100 credits on first login for testing
+    if wallet and wallet.lifetime_credits == 0:
+        add_credits(db, user_id=body.user_id, amount=100, reason="demo_signup_bonus", ledger_type=LedgerType.grant)
+    token = sign_user_token(body.user_id, settings.user_auth_secret) if settings.user_auth_secret else ""
+    return AuthSessionResponse(user_id=body.user_id, token=token, name=body.name, demo=True)
+
+
 @app.post("/api/assets/presign-upload", response_model=PresignUploadResponse, dependencies=[Depends(require_api_token)])
 def presign_upload(body: PresignUploadRequest, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> PresignUploadResponse:
     body.user_id = _scoped_user(body.user_id, x_saar_user_id, x_saar_user_token)
+    if body.content_type not in ALLOWED_UPLOAD_CONTENT_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported upload content type")
+    if body.file_size and body.file_size > settings.presign_upload_max_bytes:
+        raise HTTPException(status_code=413, detail=f"File is too large. Maximum is {settings.presign_upload_max_bytes} bytes")
     safe_name = PurePath(body.filename.replace("\\", "/")).name.replace(" ", "_")
     if not safe_name or safe_name in {".", ".."}:
         raise HTTPException(status_code=400, detail="Invalid filename")
     key = f"inputs/{body.user_id or 'anonymous'}/{uuid.uuid4()}-{safe_name}"
-    asset = Asset(user_id=body.user_id, type=body.asset_type, r2_key=key, public_url=public_url_for_key(key), mime_type=body.content_type)
+    asset = Asset(user_id=body.user_id, type=body.asset_type, r2_key=key, public_url=public_url_for_key(key), mime_type=body.content_type, file_size=body.file_size)
     db.add(asset)
     db.commit()
     db.refresh(asset)
@@ -279,9 +344,23 @@ def preview_generation_context(body: ContextPreviewRequest, db: Session = Depend
     )
 
 
+def _is_free_intelligence_confirmation(body: IntelligencePacketRequest) -> bool:
+    if body.route != "generate_plan":
+        return False
+    if body.edit_scene_id or body.edit_keyframe_id or body.scene_patch or body.keyframe_patch:
+        return False
+    if not body.scene_plan or not body.keyframes:
+        return False
+    scene_ready = all(str(item.get("status", "")).lower() in {"approved", "locked"} for item in body.scene_plan)
+    keyframes_ready = all(str(item.get("status", "")).lower() in {"approved", "locked"} for item in body.keyframes)
+    return scene_ready and keyframes_ready
+
+
 @app.post("/api/intelligence/packet", response_model=IntelligencePacketResponse, dependencies=[Depends(require_api_token)])
 def build_intelligence_packet(body: IntelligencePacketRequest, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> IntelligencePacketResponse:
     user_id = _scoped_user(body.user_id, x_saar_user_id, x_saar_user_token)
+    if not body.charge_credits and not _is_free_intelligence_confirmation(body):
+        raise HTTPException(status_code=403, detail="charge_credits=false is only allowed for final approval/export of an already approved plan")
     memory = retrieve_structured_memory(db, user_id=user_id, project_id=body.project_id)
     settings, active_context, brief = build_intelligence_inputs(body.raw_prompt, body.settings, memory)
     packet = build_generation_packet(
@@ -299,6 +378,39 @@ def build_intelligence_packet(body: IntelligencePacketRequest, db: Session = Dep
         edit_keyframe_id=body.edit_keyframe_id,
         keyframe_patch=body.keyframe_patch,
     )
+    required_credits = estimate_intelligence_credits(body.route, settings, packet, is_revision=bool(body.edit_scene_id or body.edit_keyframe_id or body.scene_patch or body.keyframe_patch))
+    wallet_balance: int | None = None
+    debited_credits = 0
+    if body.charge_credits:
+        if not user_id:
+            raise HTTPException(status_code=400, detail="user_id is required for intelligence token usage")
+        wallet = get_wallet(db, user_id, create=True)
+        assert wallet is not None
+        if wallet.balance < required_credits:
+            raise HTTPException(status_code=402, detail=f"Insufficient credits: required {required_credits}, available {wallet.balance}")
+        wallet = debit_credits(
+            db,
+            user_id=user_id,
+            amount=required_credits,
+            job_id=None,
+            reason=f"{body.route} intelligence packet",
+            meta={
+                "operation_id": f"intelligence-{uuid.uuid4()}",
+                "route": body.route,
+                "scene_count": len(packet["scene_plan"]),
+                "keyframe_count": len(packet["keyframes"]),
+                "ollama_model": settings.get("ollama_model") or get_settings().ollama_model,
+                "render_started": False,
+            },
+        )
+        wallet_balance = wallet.balance
+        debited_credits = required_credits
+    elif user_id:
+        wallet = get_wallet(db, user_id, create=True)
+        wallet_balance = wallet.balance if wallet else None
+    packet["required_credits"] = required_credits
+    packet["debited_credits"] = debited_credits
+    packet["user_balance"] = wallet_balance
     return IntelligencePacketResponse(
         packet=packet,
         quality_gate=packet["quality_gate"],
@@ -306,7 +418,21 @@ def build_intelligence_packet(body: IntelligencePacketRequest, db: Session = Dep
         reference_images=packet["reference_images"],
         keyframes=packet["keyframes"],
         final_video_prompt=packet["final_video_prompt"],
+        required_credits=required_credits,
+        debited_credits=debited_credits,
+        user_balance=wallet_balance,
     )
+
+
+def estimate_intelligence_credits(route: str, settings: dict, packet: dict, *, is_revision: bool = False) -> int:
+    duration = int(settings.get("duration_seconds") or 6)
+    keyframes = len(packet.get("keyframes") or [])
+    scenes = len(packet.get("scene_plan") or [])
+    if is_revision:
+        return max(3, min(10, 2 + keyframes))
+    if route == "direct_video":
+        return max(4, round(4 + duration / 6))
+    return max(10, round(8 + scenes * 2 + keyframes * 2 + duration / 6))
 
 
 @app.post("/api/assurance/{plan_id}/confirm", response_model=AssurancePlanResponse, dependencies=[Depends(require_api_token)])
@@ -431,6 +557,32 @@ def get_billing_wallet(user_id: str, db: Session = Depends(get_db), x_saar_user_
 def get_billing_ledger(user_id: str, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> list[CreditLedger]:
     _scoped_user(user_id, x_saar_user_id, x_saar_user_token)
     return list(db.execute(select(CreditLedger).where(CreditLedger.user_id == user_id).order_by(CreditLedger.created_at.desc()).limit(100)).scalars().all())
+
+
+@app.post("/api/billing/subscribe", response_model=WalletResponse, dependencies=[Depends(require_api_token)])
+def subscribe_plan(body: PlanSubscribeRequest, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> CreditWallet:
+    body.user_id = _scoped_user(body.user_id, x_saar_user_id, x_saar_user_token)
+    if not settings.mock_payments_enabled:
+        raise HTTPException(status_code=402, detail="Payment processor is not connected. Complete checkout before credits can be added.")
+    plan = db.execute(select(PricingPlan).where(PricingPlan.key == body.plan_key, PricingPlan.is_active.is_(True))).scalars().first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Pricing plan not found or inactive")
+    credits = plan.credits * body.cycles
+    return add_credits(
+        db,
+        user_id=body.user_id,
+        amount=credits,
+        reason=f"mock subscription plan {plan.key}",
+        ledger_type=LedgerType.grant,
+        meta={
+            "plan_key": plan.key,
+            "plan_name": plan.name,
+            "cycles": body.cycles,
+            "price_npr": plan.price_npr * body.cycles,
+            "payment_reference": body.payment_reference or "mock-local-checkout",
+            "mock_payment": True,
+        },
+    )
 
 
 @app.get("/api/admin/usage/summary", response_model=UsageSummaryResponse, dependencies=[Depends(require_admin_token)])

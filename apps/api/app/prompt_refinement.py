@@ -1,4 +1,5 @@
 from .intelligence_context import build_active_context, fill_settings
+from .ollama_client import ollama_json
 
 
 def extract_brief(raw_prompt: str, settings: dict) -> dict:
@@ -16,6 +17,14 @@ def extract_brief(raw_prompt: str, settings: dict) -> dict:
 
 
 def refine_direct_prompt(raw_prompt: str, settings: dict, active_context: dict, memory: dict) -> str:
+    if settings.get("use_ollama_refine"):
+        local = ollama_json(
+            "Return JSON only with key refined_prompt. Improve this video prompt for an open-source video generator. "
+            "Keep it concise, dense, realistic, and include subject lock, camera, lighting, motion, continuity and negatives. "
+            f"Raw prompt: {raw_prompt}\nSettings: {settings}\nActive context: {active_context}\nMemory: {memory}"
+        )
+        if isinstance(local, dict) and isinstance(local.get("refined_prompt"), str) and len(local["refined_prompt"]) > 80:
+            return local["refined_prompt"]
     subject = settings["hero_subject"]
     constraints = "; ".join(active_context["hard_constraints"][:6])
     approved = ", ".join(memory.get("approved_patterns", [])[:3])
@@ -35,6 +44,18 @@ def refine_direct_prompt(raw_prompt: str, settings: dict, active_context: dict, 
 
 
 def create_scene_plan(raw_prompt: str, settings: dict, active_context: dict, memory: dict) -> list[dict]:
+    local = ollama_json(
+        "Return JSON only in this exact shape: "
+        "{\"scenes\":[{\"title\":\"\",\"visual_description\":\"\",\"camera\":\"\",\"motion\":\"\",\"lighting\":\"\",\"subject_action\":\"\",\"reference_image_prompt\":\"\",\"negative_prompt\":\"\"}]} "
+        "Create a detailed realistic video plan for the prompt. Use 2 scenes for <=6 seconds, 3 scenes for <=10 seconds, 4 scenes for longer. "
+        "Keep actions simple and product-safe. Include strong continuity, subject lock, and negative prompts. "
+        f"Raw prompt: {raw_prompt}\nSettings: {settings}\nActive context: {active_context}\nMemory: {memory}"
+    )
+    if isinstance(local, dict) and isinstance(local.get("scenes"), list):
+        scenes = normalize_ollama_scenes(local["scenes"], raw_prompt, settings, active_context, memory)
+        if scenes:
+            return scenes
+
     duration = settings["duration_seconds"]
     scene_count = 2 if duration <= 6 else 3 if duration <= 10 else 4
     base = max(2, round(duration / scene_count))
@@ -64,6 +85,39 @@ def create_scene_plan(raw_prompt: str, settings: dict, active_context: dict, mem
             "continuity_anchors": continuity_anchors(settings, active_context),
             "reference_image_prompt": build_reference_prompt(title, settings, active_context),
             "negative_prompt": negative_prompt(memory),
+        }
+        scenes.append(scene)
+    return scenes
+
+
+def normalize_ollama_scenes(raw_scenes: list, raw_prompt: str, settings: dict, active_context: dict, memory: dict) -> list[dict]:
+    duration = settings["duration_seconds"]
+    expected = 2 if duration <= 6 else 3 if duration <= 10 else 4
+    base = max(2, round(duration / expected))
+    scenes = []
+    for index, item in enumerate(raw_scenes[:expected]):
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or f"Scene {index + 1}")
+        visual = str(item.get("visual_description") or item.get("description") or f"Controlled supporting action for: {raw_prompt.strip()}")
+        camera = str(item.get("camera") or camera_for_pace(settings["pace"]))
+        motion = str(item.get("motion") or "single controlled motion; no fast cuts")
+        lighting = str(item.get("lighting") or "soft natural directional light")
+        subject_action = str(item.get("subject_action") or visual)
+        scene = {
+            "scene_number": index + 1,
+            "id": f"scene-{index + 1}",
+            "title": title,
+            "duration": f"{base} sec",
+            "visual_description": visual,
+            "camera": camera,
+            "motion": motion,
+            "lighting": lighting,
+            "subject_action": subject_action,
+            "continuity_anchors": continuity_anchors(settings, active_context),
+            "reference_image_prompt": str(item.get("reference_image_prompt") or build_reference_prompt(title, settings, active_context, {"visual_description": visual})),
+            "negative_prompt": str(item.get("negative_prompt") or negative_prompt(memory)),
+            "local_model": "ollama",
         }
         scenes.append(scene)
     return scenes

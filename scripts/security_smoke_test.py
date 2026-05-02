@@ -37,6 +37,7 @@ def main() -> None:
         issued = client.post("/api/admin/users/token", headers=admin_headers, json={"user_id": "user-a"})
         assert issued.status_code == 200, issued.text
         user_token = issued.json()["token"]
+        assert user_token.startswith("v1."), user_token
         user_headers = {**api_headers, "x-saar-user-id": "user-a", "x-saar-user-token": user_token}
 
         denied = client.get("/api/billing/wallet?user_id=user-a", headers=api_headers)
@@ -47,6 +48,20 @@ def main() -> None:
 
         grant = client.post("/api/admin/billing/grant", headers=admin_headers, json={"user_id": "user-a", "amount": 200})
         assert grant.status_code == 200, grant.text
+
+        free_abuse = client.post(
+            "/api/intelligence/packet",
+            headers=user_headers,
+            json={"user_id": "user-a", "route": "direct_video", "raw_prompt": "free prompt", "charge_credits": False},
+        )
+        assert free_abuse.status_code == 403, free_abuse.text
+
+        bad_upload = client.post(
+            "/api/assets/presign-upload",
+            headers=user_headers,
+            json={"user_id": "user-a", "filename": "payload.exe", "content_type": "application/x-msdownload", "file_size": 100, "asset_type": "image"},
+        )
+        assert bad_upload.status_code == 400, bad_upload.text
 
         db = SessionLocal()
         try:
@@ -83,6 +98,9 @@ def main() -> None:
         assert first.status_code == 200, first.text
         second = client.post("/api/coupons/redeem", headers=user_headers, json={"user_id": "user-a", "code": "ONCE"})
         assert second.status_code == 400, second.text
+
+        negative_purchase = client.post("/api/coupons/redeem", headers=user_headers, json={"user_id": "user-a", "code": "ONCE", "purchase_credits": -10})
+        assert negative_purchase.status_code == 422, negative_purchase.text
 
         print({"ok": True, "job_id": job["id"], "required_credits": job["required_credits"]})
 

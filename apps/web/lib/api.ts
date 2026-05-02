@@ -50,6 +50,13 @@ export type Wallet = {
   updated_at: string;
 };
 
+export type AuthSession = {
+  user_id: string;
+  token: string;
+  name?: string | null;
+  demo: boolean;
+};
+
 export type UsageSummary = {
   total_jobs: number;
   completed_jobs: number;
@@ -95,6 +102,9 @@ export type IntelligencePacket = {
   reference_images: Array<Record<string, unknown>>;
   keyframes: Array<Record<string, unknown>>;
   final_video_prompt: string;
+  required_credits: number;
+  debited_credits: number;
+  user_balance?: number | null;
 };
 
 export type ModelEndpoint = {
@@ -225,6 +235,7 @@ export async function uploadAsset(file: File, userId?: string, userToken?: strin
     body: JSON.stringify({
       filename: file.name,
       content_type: file.type || "application/octet-stream",
+      file_size: file.size,
       asset_type: file.type.startsWith("video/") ? "video" : file.type.startsWith("audio/") ? "audio" : "image",
       user_id: userId || null,
     }),

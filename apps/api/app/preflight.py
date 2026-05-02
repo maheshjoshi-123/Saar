@@ -22,7 +22,11 @@ def check_preflight(settings: Settings | None = None) -> dict:
     add("admin_auth", bool(settings.admin_auth_token), "Set ADMIN_AUTH_TOKEN")
     add("auth_separation", bool(settings.admin_auth_token and settings.api_auth_token and settings.admin_auth_token != settings.api_auth_token), "ADMIN_AUTH_TOKEN and API_AUTH_TOKEN must be different")
     add("user_auth", (not settings.user_auth_enforced) or bool(settings.user_auth_secret), "Set USER_AUTH_SECRET when USER_AUTH_ENFORCED=true")
+    add("request_body_limit", settings.request_body_limit_bytes > 0, "Set REQUEST_BODY_LIMIT_BYTES to a positive value")
+    add("rate_limit", settings.rate_limit_enabled and settings.rate_limit_per_minute > 0, "Enable API rate limiting")
     add("billing_guard", settings.billing_enforced, "Set BILLING_ENFORCED=true before taking paid users")
+    add("demo_auth_guard", not settings.is_production_like or not settings.demo_auth_enabled, "Disable DEMO_AUTH_ENABLED in production")
+    add("mock_payment_guard", not settings.is_production_like or not settings.mock_payments_enabled, "Disable MOCK_PAYMENTS_ENABLED in production")
     add("runpod_auth", settings.runpod_mock or bool(settings.runpod_api_key), "Set RUNPOD_API_KEY or RUNPOD_MOCK=true")
 
     endpoint_values = []

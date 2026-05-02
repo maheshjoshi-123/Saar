@@ -17,6 +17,15 @@ class Settings(BaseSettings):
     billing_enforced: bool = Field(default=False, alias="BILLING_ENFORCED")
     user_auth_enforced: bool = Field(default=False, alias="USER_AUTH_ENFORCED")
     user_auth_secret: str = Field(default="", alias="USER_AUTH_SECRET")
+    user_token_ttl_seconds: int = Field(default=604800, alias="USER_TOKEN_TTL_SECONDS")
+    request_body_limit_bytes: int = Field(default=2_000_000, alias="REQUEST_BODY_LIMIT_BYTES")
+    rate_limit_enabled: bool = Field(default=True, alias="RATE_LIMIT_ENABLED")
+    rate_limit_per_minute: int = Field(default=120, alias="RATE_LIMIT_PER_MINUTE")
+    admin_rate_limit_per_minute: int = Field(default=30, alias="ADMIN_RATE_LIMIT_PER_MINUTE")
+    presign_upload_max_bytes: int = Field(default=104_857_600, alias="PRESIGN_UPLOAD_MAX_BYTES")
+    security_headers_enabled: bool = Field(default=True, alias="SECURITY_HEADERS_ENABLED")
+    demo_auth_enabled: bool = Field(default=True, alias="DEMO_AUTH_ENABLED")
+    mock_payments_enabled: bool = Field(default=True, alias="MOCK_PAYMENTS_ENABLED")
 
     database_url: str = Field(default="postgresql+psycopg://postgres:postgres@localhost:5432/saar", alias="DATABASE_URL")
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
@@ -39,11 +48,19 @@ class Settings(BaseSettings):
     r2_region: str = Field(default="auto", alias="R2_REGION")
 
     workflow_dir: str = Field(default="workflows", alias="WORKFLOW_DIR")
+    ollama_enabled: bool = Field(default=True, alias="OLLAMA_ENABLED")
+    ollama_model: str = Field(default="qwen2.5:7b", alias="OLLAMA_MODEL")
+    ollama_url: str = Field(default="http://localhost:11434", alias="OLLAMA_URL")
+    local_reference_dir: str = Field(default="apps/web/public/local-placeholders", alias="LOCAL_REFERENCE_DIR")
 
     @property
     def allowed_origins(self) -> list[str]:
         explicit = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
         return explicit or [self.frontend_url, "http://localhost:3000"]
+
+    @property
+    def is_production_like(self) -> bool:
+        return self.saar_env.lower() in {"production", "prod", "staging"}
 
 
 @lru_cache

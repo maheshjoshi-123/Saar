@@ -31,7 +31,7 @@ def build_generation_packet(
         if edit_keyframe_id and keyframe_patch:
             keyframes = update_keyframe_part(keyframes, edit_keyframe_id, keyframe_patch, settings)
 
-    refined_prompt = refine_direct_prompt(raw_prompt, settings, active_context, memory)
+    refined_prompt = refine_direct_prompt(raw_prompt, {**settings, "use_ollama_refine": route == "direct_video"}, active_context, memory)
     reference_images = [
         {
             "scene_id": scene.get("id"),
@@ -107,14 +107,71 @@ def recommendations_for(checks: dict) -> list[str]:
 def build_final_video_prompt(refined_prompt: str, scene_plan: list[dict], memory: dict) -> str:
     if not scene_plan:
         return refined_prompt
+    
     scene_lines = []
     for scene in scene_plan:
         scene_lines.append(
             f"Scene {scene.get('scene_number')}: {scene.get('visual_description')} "
             f"Camera: {scene.get('camera')}. Motion: {scene.get('motion')}. Lighting: {scene.get('lighting')}."
         )
+    
     negatives = ", ".join(memory.get("negative_preferences", [])[:8])
-    return f"{refined_prompt} Scene plan: {' '.join(scene_lines)} Negative constraints: {negatives}."
+    brand_rules = "; ".join(memory.get("brand_rules", [])[:5])
+    
+    detailed_prompt = f"""## OVERALL VIDEO DIRECTION & LLM INSTRUCTIONS
+
+**Base Concept:** {refined_prompt}
+
+**Scene Breakdown:**
+{chr(10).join(scene_lines)}
+
+**Visual Storytelling Guidelines:**
+- Every transition must be smooth and purposeful, maintaining narrative continuity
+- Pacing should match the emotional arc of the narrative
+- Each scene builds upon the previous one, creating cohesive flow
+- Product/subject must remain visually consistent across all scenes
+
+**Cinematography & Camera Work:**
+- Focus on deliberate camera movements that enhance the story
+- Avoid jarring or unmotivated transitions between shots
+- Use depth of field strategically to guide viewer attention
+- Maintain spatial consistency across scenes
+
+**Lighting Direction:**
+- Establish a consistent lighting language across the entire video
+- Use light to create mood and emphasis
+- Soft, directional lighting for natural, premium feel
+- Avoid harsh shadows unless intentional for dramatic effect
+
+**Color Grading & Tone:**
+- Maintain color consistency that aligns with brand identity
+- Use complementary colors to create visual interest
+- Ensure proper color balance across all scenes
+- Preserve product colors exactly as specified
+
+**Animation & Motion:**
+- All motion should feel organic and intentional
+- Transitions between scenes should flow naturally
+- Avoid distracting effects; prioritize storytelling
+- Motion should enhance rather than distract from the message
+
+**Asset Continuity:**
+- Product/subject appearance must be identical across all scenes
+- Logo placement and visibility must be consistent
+- Material texture and surface properties must remain stable
+- Ensure clean, mobile-first framing throughout
+
+**Negative Constraints (Avoid):** {negatives}
+
+**Brand Rules & Safety:** {brand_rules if brand_rules else 'Follow standard brand safety guidelines'}
+
+**Final Output Requirements:**
+- All scenes must work cohesively as a single video
+- Final frame should have clear CTA or hero moment
+- Video should feel premium, polished, and on-brand
+- Ready for social media distribution on specified platforms"""
+    
+    return detailed_prompt
 
 
 def build_final_approval_packet(scene_plan: list[dict], keyframes: list[dict], final_prompt: str, memory: dict, active_context: dict) -> dict:

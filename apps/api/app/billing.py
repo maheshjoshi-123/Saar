@@ -61,6 +61,74 @@ def seed_default_plans(db: Session) -> None:
     db.commit()
 
 
+def seed_test_coupons(db: Session) -> None:
+    """Create test coupons for QA and demo purposes."""
+    test_coupons = [
+        {
+            "code": "FREE50",
+            "description": "Free 50 credits - full free coupon",
+            "credit_amount": 50,
+            "percent_bonus": 0,
+            "max_redemptions": None,
+            "expires_at": None,
+            "is_active": True,
+        },
+        {
+            "code": "DISCOUNT25",
+            "description": "25% bonus on any purchase (discount coupon)",
+            "credit_amount": 0,
+            "percent_bonus": 25,
+            "max_redemptions": None,
+            "expires_at": None,
+            "is_active": True,
+        },
+        {
+            "code": "STARTUP100",
+            "description": "Startup package: 100 free credits",
+            "credit_amount": 100,
+            "percent_bonus": 0,
+            "max_redemptions": 100,
+            "expires_at": None,
+            "is_active": True,
+        },
+        {
+            "code": "BONUS50",
+            "description": "Purchase bonus: Get 50% extra credits",
+            "credit_amount": 0,
+            "percent_bonus": 50,
+            "max_redemptions": None,
+            "expires_at": None,
+            "is_active": True,
+        },
+        {
+            "code": "PROMO10",
+            "description": "Promotional coupon: 10 free credits + 10% bonus",
+            "credit_amount": 10,
+            "percent_bonus": 10,
+            "max_redemptions": 500,
+            "expires_at": None,
+            "is_active": True,
+        },
+        {
+            "code": "CHINA_SELLER",
+            "description": "Special coupon for Chinese seller test: 200 free credits",
+            "credit_amount": 200,
+            "percent_bonus": 0,
+            "max_redemptions": 5,
+            "expires_at": None,
+            "is_active": True,
+        },
+    ]
+    
+    for coupon_data in test_coupons:
+        existing = db.execute(select(Coupon).where(Coupon.code == coupon_data["code"])).scalars().first()
+        if existing:
+            continue
+        coupon = Coupon(**coupon_data)
+        db.add(coupon)
+    db.commit()
+
+
 def get_wallet(db: Session, user_id: str, create: bool = True) -> CreditWallet | None:
     wallet = db.execute(select(CreditWallet).where(CreditWallet.user_id == user_id)).scalars().first()
     if not wallet and create:
@@ -107,7 +175,13 @@ def estimate_generation_cost(task_type: TaskType, *, duration_seconds: int = 6, 
     }
 
 
+def _require_positive_amount(amount: int, label: str = "amount") -> None:
+    if not isinstance(amount, int) or amount <= 0:
+        raise ValueError(f"{label} must be a positive integer")
+
+
 def add_credits(db: Session, *, user_id: str, amount: int, reason: str, ledger_type: LedgerType = LedgerType.grant, meta: dict | None = None) -> CreditWallet:
+    _require_positive_amount(amount)
     wallet = _locked_wallet(db, user_id)
     wallet.balance += amount
     wallet.lifetime_credits += max(amount, 0)
@@ -118,7 +192,8 @@ def add_credits(db: Session, *, user_id: str, amount: int, reason: str, ledger_t
     return wallet
 
 
-def debit_credits(db: Session, *, user_id: str, amount: int, job_id: str, reason: str, meta: dict | None = None) -> CreditWallet:
+def debit_credits(db: Session, *, user_id: str, amount: int, job_id: str | None = None, reason: str, meta: dict | None = None) -> CreditWallet:
+    _require_positive_amount(amount)
     wallet = _locked_wallet(db, user_id)
     if wallet.balance < amount:
         raise ValueError(f"Insufficient credits: required {amount}, available {wallet.balance}")
@@ -132,6 +207,7 @@ def debit_credits(db: Session, *, user_id: str, amount: int, job_id: str, reason
 
 
 def refund_credits(db: Session, *, user_id: str, amount: int, job_id: str, reason: str) -> CreditWallet:
+    _require_positive_amount(amount)
     wallet = _locked_wallet(db, user_id)
     wallet.balance += amount
     wallet.lifetime_spent = max(0, wallet.lifetime_spent - amount)
@@ -143,6 +219,8 @@ def refund_credits(db: Session, *, user_id: str, amount: int, job_id: str, reaso
 
 
 def redeem_coupon(db: Session, *, user_id: str, code: str, purchase_credits: int = 0) -> CreditWallet:
+    if purchase_credits < 0:
+        raise ValueError("purchase_credits cannot be negative")
     coupon = db.execute(select(Coupon).where(Coupon.code == code.strip().upper()).with_for_update()).scalars().first()
     if not coupon or not coupon.is_active:
         raise ValueError("Invalid coupon")
