@@ -118,7 +118,7 @@ The backend maps job task types to RunPod endpoints:
 | `premium_quality` | HunyuanVideo | `RUNPOD_HUNYUAN_ENDPOINT_ID` |
 | `video_upscale` | Upscale workflow | `RUNPOD_UPSCALE_ENDPOINT_ID` |
 
-Database rows in `model_endpoints` override env defaults when present.
+Database rows in `model_endpoints` override env defaults when present. `GET /api/models` returns active database routes plus configured environment defaults, so the frontend can switch between task-specific models safely. If a request specifies an unknown `model_key`, the API rejects it instead of silently falling back to another GPU endpoint.
 
 ## RunPod Worker Contract
 
@@ -127,11 +127,12 @@ The API submits:
 ```json
 {
   "input": {
-    "workflow": {},
-    "images": [],
-    "metadata": {
-      "job_id": "uuid",
-      "task_type": "image_to_video"
+      "workflow": {},
+      "images": [],
+      "files": [],
+      "metadata": {
+        "job_id": "uuid",
+        "task_type": "image_to_video"
     }
   },
   "webhook": "https://your-api/api/runpod/webhook"
@@ -142,7 +143,7 @@ The worker supports both polling and callback flows. For MVP stability, Saar que
 
 ## Included RunPod Worker
 
-This repo includes `workers/runpod-comfyui`, a deployable serverless worker that starts ComfyUI headlessly, downloads input images from presigned URLs, submits ComfyUI API workflow JSON, waits for WebSocket completion, uploads generated `.mp4` files to Cloudflare R2, and returns `{ "video_url": "..." }`.
+This repo includes `workers/runpod-comfyui`, a deployable serverless worker that starts ComfyUI headlessly, downloads input images/videos/audio from presigned URLs, submits ComfyUI API workflow JSON, waits for WebSocket completion, uploads generated `.mp4` files to Cloudflare R2, and returns `{ "video_url": "..." }`. Video upscaling depends on the `files` payload because the source video must be copied into the ComfyUI input directory before the upscale workflow runs.
 
 Build and push:
 
@@ -185,7 +186,13 @@ See [docs/ASSURANCE_PIPELINE.md](docs/ASSURANCE_PIPELINE.md).
 
 ## Billing and Tokens
 
-Saar includes credit wallets, pricing plans, job cost estimation, admin credit grants, discount coupons, redemption, ledger history, and automatic refunds when a debited generation fails. Set `BILLING_ENFORCED=true` when you want the API to block video generation if the user does not have enough credits.
+Saar includes credit wallets, pricing plans, job cost estimation, admin credit grants, plan subscription crediting, discount coupons, redemption, ledger history, and automatic refunds when a debited generation fails. Set `BILLING_ENFORCED=true` when you want the API to block video generation if the user does not have enough credits.
+
+Admin billing endpoints:
+
+- `POST /api/admin/billing/subscribe` credits a user from a pricing tier after your payment provider confirms the subscription or purchase.
+- `POST /api/admin/billing/grant` manually grants credits.
+- `POST /api/admin/coupons` creates discount/token coupons.
 
 For production user isolation, set `USER_AUTH_ENFORCED=true`, configure `USER_AUTH_SECRET`, and issue customer access tokens with `POST /api/admin/users/token`.
 

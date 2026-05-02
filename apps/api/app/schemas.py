@@ -78,6 +78,13 @@ class CreditGrantRequest(BaseModel):
     reason: str = "admin grant"
 
 
+class PlanSubscribeRequest(BaseModel):
+    user_id: str
+    plan_key: str
+    cycles: int = Field(default=1, ge=1, le=24)
+    payment_reference: str | None = None
+
+
 class UserTokenRequest(BaseModel):
     user_id: str
 
@@ -271,6 +278,7 @@ class JobResponse(BaseModel):
 
 class ModelEndpointIn(BaseModel):
     key: str
+    provider: str = "runpod"
     endpoint_id: str
     model_name: str
     task_type: TaskType

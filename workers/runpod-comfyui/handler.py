@@ -59,14 +59,18 @@ def get_history(prompt_id: str) -> dict:
     return history
 
 
-def download_input_images(images: list[dict]) -> None:
+def download_input_files(files: list[dict]) -> None:
     input_dir = Path("/app/ComfyUI/input")
     input_dir.mkdir(parents=True, exist_ok=True)
-    for image in images:
-        url = image.get("url")
-        name = Path(str(image.get("name") or "")).name
+    seen: set[str] = set()
+    for item in files:
+        url = item.get("url")
+        name = Path(str(item.get("name") or "")).name
         if not url or not name:
             continue
+        if name in seen:
+            continue
+        seen.add(name)
         response = requests.get(url, timeout=180)
         response.raise_for_status()
         (input_dir / name).write_bytes(response.content)
@@ -125,7 +129,7 @@ def handler(event: dict) -> dict:
 
     metadata = job_input.get("metadata") or {}
     job_id = metadata.get("job_id") or str(uuid.uuid4())
-    download_input_images(job_input.get("images") or [])
+    download_input_files([*(job_input.get("images") or []), *(job_input.get("files") or [])])
 
     prompt_id = queue_prompt(workflow)
     history = wait_for_prompt(prompt_id, int(job_input.get("timeout_seconds", 3600)))

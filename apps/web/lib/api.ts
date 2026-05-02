@@ -58,6 +58,20 @@ export type CostEstimate = {
   has_enough_credits?: boolean | null;
 };
 
+export type ModelEndpoint = {
+  id: string;
+  key: string;
+  provider: string;
+  endpoint_id: string;
+  model_name: string;
+  task_type: TaskType;
+  workflow_file: string;
+  is_active: boolean;
+  priority: number;
+  max_concurrency: number;
+  estimated_cost?: number | null;
+};
+
 export type Coupon = {
   id: string;
   code: string;
@@ -145,7 +159,18 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || response.statusText);
+    let message = text;
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown };
+      if (typeof parsed.detail === "string") {
+        message = parsed.detail;
+      } else if (parsed.detail) {
+        message = JSON.stringify(parsed.detail);
+      }
+    } catch {
+      // Fall through to the raw response body when the backend did not return JSON.
+    }
+    throw new Error(message || response.statusText);
   }
   return response.json() as Promise<T>;
 }

@@ -14,8 +14,8 @@ from .context_compiler import compile_generation_context
 from .models import AssurancePlan, AssuranceStatus, Asset, AssetType, Coupon, CreditLedger, CreditWallet, Job, JobEvent, JobStatus, LedgerType, MemoryItem, ModelEndpoint, PricingPlan, PromptVersion, QualityReport, RevisionRequest, TaskType
 from .preflight import check_preflight
 from .r2 import presign_put, public_url_for_key
-from .router import resolve_endpoint
-from .schemas import AssurancePlanResponse, ConfirmAssuranceRequest, CostEstimateRequest, CostEstimateResponse, CouponIn, CouponOut, CreditGrantRequest, CreateJobRequest, DesireIntakeRequest, FeedbackIn, JobEventResponse, JobResponse, LedgerResponse, MemoryItemIn, MemoryItemOut, ModelEndpointIn, ModelEndpointOut, PresignUploadRequest, PresignUploadResponse, PricingPlanIn, PricingPlanOut, PromptVersionResponse, QualityReportResponse, RedeemCouponRequest, RevisionRequestIn, RevisionRequestOut, UserTokenRequest, UserTokenResponse, WalletResponse
+from .router import list_available_endpoints, resolve_endpoint
+from .schemas import AssurancePlanResponse, ConfirmAssuranceRequest, CostEstimateRequest, CostEstimateResponse, CouponIn, CouponOut, CreditGrantRequest, CreateJobRequest, DesireIntakeRequest, FeedbackIn, JobEventResponse, JobResponse, LedgerResponse, MemoryItemIn, MemoryItemOut, ModelEndpointIn, ModelEndpointOut, PlanSubscribeRequest, PresignUploadRequest, PresignUploadResponse, PricingPlanIn, PricingPlanOut, PromptVersionResponse, QualityReportResponse, RedeemCouponRequest, RevisionRequestIn, RevisionRequestOut, UserTokenRequest, UserTokenResponse, WalletResponse
 from .security import require_admin_token, require_api_token, require_user_scope, sign_user_token
 from .tasks import process_job
 
@@ -74,6 +74,19 @@ def health() -> dict:
     return {"ok": True, "env": settings.saar_env}
 
 
+@app.get("/")
+def root() -> dict:
+    return {
+        "ok": True,
+        "service": "Saar API",
+        "version": app.version,
+        "health": "/health",
+        "ready": "/ready",
+        "docs": "/docs",
+        "api": "/api",
+    }
+
+
 @app.get("/ready")
 def ready() -> dict:
     return check_preflight()
@@ -123,6 +136,10 @@ def create_job(body: CreateJobRequest, db: Session = Depends(get_db), x_saar_use
 
     try:
         endpoint = resolve_endpoint(db, body.task_type, body.model_key)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Model routing failed: {exc}") from exc
+
+    try:
         compiled = compile_generation_context(
             db,
             raw_prompt=body.prompt,
@@ -207,7 +224,11 @@ def assurance_intake(body: DesireIntakeRequest, db: Session = Depends(get_db), x
 @app.post("/api/jobs/estimate", response_model=CostEstimateResponse, dependencies=[Depends(require_api_token)])
 def estimate_job_cost(body: CostEstimateRequest, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> CostEstimateResponse:
     body.user_id = _scoped_user(body.user_id, x_saar_user_id, x_saar_user_token)
-    estimate = estimate_generation_cost(body.task_type, duration_seconds=body.duration_seconds, quality=body.quality, complexity_score=body.complexity_score, model_key=body.model_key)
+    try:
+        endpoint = resolve_endpoint(db, body.task_type, body.model_key)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Model routing failed: {exc}") from exc
+    estimate = estimate_generation_cost(body.task_type, duration_seconds=body.duration_seconds, quality=body.quality, complexity_score=body.complexity_score, model_key=endpoint.key)
     wallet = get_wallet(db, body.user_id, create=True) if body.user_id else None
     return CostEstimateResponse(
         **estimate,
@@ -345,6 +366,28 @@ def admin_grant_credits(body: CreditGrantRequest, db: Session = Depends(get_db))
     return add_credits(db, user_id=body.user_id, amount=body.amount, reason=body.reason, ledger_type=LedgerType.grant)
 
 
+@app.post("/api/admin/billing/subscribe", response_model=WalletResponse, dependencies=[Depends(require_admin_token)])
+def admin_subscribe_plan(body: PlanSubscribeRequest, db: Session = Depends(get_db)) -> CreditWallet:
+    plan = db.execute(select(PricingPlan).where(PricingPlan.key == body.plan_key, PricingPlan.is_active.is_(True))).scalars().first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Pricing plan not found or inactive")
+    credits = plan.credits * body.cycles
+    return add_credits(
+        db,
+        user_id=body.user_id,
+        amount=credits,
+        reason=f"subscription plan {plan.key}",
+        ledger_type=LedgerType.grant,
+        meta={
+            "plan_key": plan.key,
+            "plan_name": plan.name,
+            "cycles": body.cycles,
+            "price_npr": plan.price_npr * body.cycles,
+            "payment_reference": body.payment_reference,
+        },
+    )
+
+
 @app.post("/api/admin/users/token", response_model=UserTokenResponse, dependencies=[Depends(require_admin_token)])
 def admin_issue_user_token(body: UserTokenRequest) -> UserTokenResponse:
     if not settings.user_auth_secret:
@@ -436,6 +479,7 @@ def upsert_model_endpoint(body: ModelEndpointIn, db: Session = Depends(get_db)) 
         db.add(endpoint)
     endpoint.endpoint_id = body.endpoint_id
     endpoint.model_name = body.model_name
+    endpoint.provider = body.provider
     endpoint.task_type = body.task_type
     endpoint.workflow_file = body.workflow_file
     endpoint.is_active = body.is_active
@@ -449,7 +493,7 @@ def upsert_model_endpoint(body: ModelEndpointIn, db: Session = Depends(get_db)) 
 
 @app.get("/api/models", response_model=list[ModelEndpointOut], dependencies=[Depends(require_api_token)])
 def list_models(db: Session = Depends(get_db)) -> list[ModelEndpoint]:
-    return list(db.execute(select(ModelEndpoint).order_by(ModelEndpoint.priority.asc())).scalars().all())
+    return list_available_endpoints(db)
 
 
 @app.post("/api/runpod/webhook")

@@ -26,6 +26,7 @@ import {
   CostEstimate,
   Coupon,
   Job,
+  ModelEndpoint,
   PricingPlan,
   PromptVersion,
   QualityReport,
@@ -65,6 +66,7 @@ export default function Home() {
   const [product, setProduct] = useState("warm grey curved-brim cap");
   const [location, setLocation] = useState("Kathmandu rooftop");
   const [taskType, setTaskType] = useState<TaskType>("text_to_video_quality");
+  const [modelKey, setModelKey] = useState("");
   const [userId, setUserId] = useState("demo-user");
   const [userToken, setUserToken] = useState("");
   const [couponCode, setCouponCode] = useState("SAAR100");
@@ -72,6 +74,7 @@ export default function Home() {
   const [adminCouponCode, setAdminCouponCode] = useState("SAAR100");
   const [adminCouponCredits, setAdminCouponCredits] = useState(100);
   const [adminGrantAmount, setAdminGrantAmount] = useState(250);
+  const [adminPlanKey, setAdminPlanKey] = useState("creator");
   const [file, setFile] = useState<File | null>(null);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [plan, setPlan] = useState<AssurancePlan | null>(null);
@@ -93,6 +96,11 @@ export default function Home() {
     queryFn: () => api<PricingPlan[]>("/api/pricing/plans"),
   });
 
+  const models = useQuery({
+    queryKey: ["models"],
+    queryFn: () => api<ModelEndpoint[]>("/api/models"),
+  });
+
   const wallet = useQuery({
     queryKey: ["wallet", userId, userToken],
     queryFn: () => api<Wallet>(`/api/billing/wallet?user_id=${encodeURIComponent(userId)}`, { headers: scopedHeaders }),
@@ -100,13 +108,14 @@ export default function Home() {
   });
 
   const estimate = useQuery({
-    queryKey: ["estimate", taskType, userId, userToken],
+    queryKey: ["estimate", taskType, modelKey, userId, userToken],
     queryFn: () =>
       api<CostEstimate>("/api/jobs/estimate", {
         method: "POST",
         headers: scopedHeaders,
         body: JSON.stringify({
           task_type: taskType,
+          model_key: modelKey || null,
           duration_seconds: 6,
           quality: taskType === "premium_quality" ? "premium" : taskType === "fast_preview" ? "preview" : "standard",
           complexity_score: plan?.confidence.visual_risk === "medium" ? 6 : 5,
@@ -170,6 +179,7 @@ export default function Home() {
         body: JSON.stringify({
           prompt: idea,
           task_type: taskType,
+          model_key: modelKey || null,
           user_id: userId,
           input_asset_id: inputAssetId || null,
           options: {
@@ -215,6 +225,19 @@ export default function Home() {
     onSuccess: () => wallet.refetch(),
   });
 
+  const subscribePlan = useMutation({
+    mutationFn: () =>
+      api<Wallet>("/api/admin/billing/subscribe", {
+        method: "POST",
+        headers: { "x-saar-admin-key": adminKey },
+        body: JSON.stringify({ user_id: userId, plan_key: adminPlanKey, cycles: 1, payment_reference: "admin-console" }),
+      }),
+    onSuccess: () => {
+      wallet.refetch();
+      estimate.refetch();
+    },
+  });
+
   const createCoupon = useMutation({
     mutationFn: () =>
       api<Coupon>("/api/admin/coupons", {
@@ -255,6 +278,7 @@ export default function Home() {
   });
 
   const selectedTask = useMemo(() => TASKS.find((item) => item.value === taskType), [taskType]);
+  const availableModels = useMemo(() => (models.data || []).filter((item) => item.task_type === taskType), [models.data, taskType]);
   const fileRequired = taskType === "image_to_video" || taskType === "video_upscale";
   const creditState = !estimate.data ? "checking" : estimate.data.has_enough_credits === false ? "needed" : "ready";
   const hasEnoughCredits = creditState === "ready";
@@ -262,7 +286,7 @@ export default function Home() {
   const currentJob = activeJob.data;
   const assuranceReady = plan?.status === "confirmed";
   const progress = assuranceReady ? 66 : plan ? 40 : 12;
-  const serviceError = pricing.error || wallet.error || jobs.error || estimate.error;
+  const serviceError = pricing.error || wallet.error || jobs.error || estimate.error || models.error;
 
   function onAssuranceSubmit(event: FormEvent) {
     event.preventDefault();
@@ -274,6 +298,7 @@ export default function Home() {
     wallet.refetch();
     estimate.refetch();
     pricing.refetch();
+    models.refetch();
     if (activeJobId) {
       activeJob.refetch();
       promptVersion.refetch();
@@ -451,8 +476,14 @@ export default function Home() {
 
             <GeneratePanel
               taskType={taskType}
-              setTaskType={setTaskType}
+              setTaskType={(value) => {
+                setTaskType(value);
+                setModelKey("");
+              }}
               selectedTask={selectedTask}
+              models={availableModels}
+              modelKey={modelKey}
+              setModelKey={setModelKey}
               file={file}
               setFile={setFile}
               fileRequired={fileRequired}
@@ -505,6 +536,12 @@ export default function Home() {
                 grantCredits={() => grantCredits.mutate()}
                 grantPending={grantCredits.isPending}
                 grantError={grantCredits.error as Error | null}
+                pricing={pricing.data || []}
+                adminPlanKey={adminPlanKey}
+                setAdminPlanKey={setAdminPlanKey}
+                subscribePlan={() => subscribePlan.mutate()}
+                subscribePending={subscribePlan.isPending}
+                subscribeError={subscribePlan.error as Error | null}
                 adminCouponCode={adminCouponCode}
                 setAdminCouponCode={setAdminCouponCode}
                 adminCouponCredits={adminCouponCredits}
@@ -550,7 +587,7 @@ function SidePanel({
           <Metric label="Estimate" value={estimate ? `${estimate.required_credits}` : "--"} />
         </div>
         {estimate?.has_enough_credits === false ? (
-          <p className="mt-4 rounded-md bg-red-50 p-3 text-sm text-red-800">Required {estimate.required_credits}, available {estimate.user_balance ?? 0}.</p>
+          <p className="mt-4 rounded-md bg-red-50 p-3 text-sm text-red-800">Required {estimate.required_credits}, available {estimate.user_balance ?? 0}. Add tokens through a plan or redeem a coupon before rendering.</p>
         ) : null}
         <div className="mt-4 flex gap-2">
           <input value={couponCode} onChange={(event) => setCouponCode(event.target.value)} className="min-w-0 flex-1 rounded-md border border-slate-200 px-3 py-2 text-sm" />
@@ -583,6 +620,9 @@ function GeneratePanel({
   taskType,
   setTaskType,
   selectedTask,
+  models,
+  modelKey,
+  setModelKey,
   file,
   setFile,
   fileRequired,
@@ -596,6 +636,9 @@ function GeneratePanel({
   taskType: TaskType;
   setTaskType: (value: TaskType) => void;
   selectedTask?: { value: TaskType; label: string; hint: string };
+  models: ModelEndpoint[];
+  modelKey: string;
+  setModelKey: (value: string) => void;
   file: File | null;
   setFile: (file: File | null) => void;
   fileRequired: boolean;
@@ -620,6 +663,21 @@ function GeneratePanel({
           <span className="mt-1 block text-xs text-slate-500">{selectedTask?.hint}</span>
         </label>
 
+        <label className="block">
+          <span className="text-sm font-medium">Model route</span>
+          <select value={modelKey} onChange={(event) => setModelKey(event.target.value)} className="mt-2 w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
+            <option value="">Auto best route</option>
+            {models.map((model) => (
+              <option key={model.id} value={model.key}>
+                {model.model_name} ({model.provider})
+              </option>
+            ))}
+          </select>
+          <span className="mt-1 block text-xs text-slate-500">
+            {models.length ? "Switches the backend RunPod model/workflow for this task." : "No active model route found for this task."}
+          </span>
+        </label>
+
         <label className="block rounded-md border border-dashed border-slate-300 p-4">
           <span className="inline-flex items-center gap-2 text-sm font-medium"><UploadCloud size={16} /> {fileRequired ? "Input required" : "Reference file"}</span>
           <input type="file" accept="image/*,video/*,audio/*" onChange={(event) => setFile(event.target.files?.[0] || null)} className="mt-3 block w-full text-sm" />
@@ -637,7 +695,7 @@ function GeneratePanel({
           </div>
         </div>
 
-        {!hasEnoughCredits ? <p className="rounded-md bg-red-50 p-3 text-sm text-red-800">Add credits before rendering.</p> : null}
+        {!hasEnoughCredits ? <p className="rounded-md bg-red-50 p-3 text-sm text-red-800">Add tokens from a subscription plan before rendering.</p> : null}
 
         <button disabled={!canGenerate} onClick={createJob} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-teal px-4 text-sm font-semibold text-white disabled:opacity-50">
           <Play size={16} /> {pending ? "Submitting" : "Generate video"}
@@ -751,6 +809,12 @@ function AdminPanel({
   grantCredits,
   grantPending,
   grantError,
+  pricing,
+  adminPlanKey,
+  setAdminPlanKey,
+  subscribePlan,
+  subscribePending,
+  subscribeError,
   adminCouponCode,
   setAdminCouponCode,
   adminCouponCredits,
@@ -767,6 +831,12 @@ function AdminPanel({
   grantCredits: () => void;
   grantPending: boolean;
   grantError: Error | null;
+  pricing: PricingPlan[];
+  adminPlanKey: string;
+  setAdminPlanKey: (value: string) => void;
+  subscribePlan: () => void;
+  subscribePending: boolean;
+  subscribeError: Error | null;
   adminCouponCode: string;
   setAdminCouponCode: (value: string) => void;
   adminCouponCredits: number;
@@ -787,6 +857,18 @@ function AdminPanel({
             <Coins size={15} /> Grant
           </button>
         </div>
+        <div className="grid grid-cols-[1fr_auto] gap-2">
+          <select value={adminPlanKey} onChange={(event) => setAdminPlanKey(event.target.value)} className="rounded-md border border-slate-200 px-3 py-2 text-sm">
+            {pricing.map((plan) => (
+              <option key={plan.id} value={plan.key}>
+                {plan.name} - {plan.credits} credits
+              </option>
+            ))}
+          </select>
+          <button onClick={subscribePlan} disabled={subscribePending || !adminPlanKey} className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm font-medium disabled:opacity-50">
+            <Coins size={15} /> Add plan
+          </button>
+        </div>
         <div className="grid gap-2 sm:grid-cols-2">
           <TextField label="Coupon code" value={adminCouponCode} setValue={setAdminCouponCode} />
           <label className="block">
@@ -799,6 +881,7 @@ function AdminPanel({
         </button>
         {createdCoupon ? <p className="rounded-md bg-emerald-50 p-2 text-sm text-emerald-800">{createdCoupon.code} active</p> : null}
         {grantError ? <ErrorText error={grantError} /> : null}
+        {subscribeError ? <ErrorText error={subscribeError} /> : null}
         {couponError ? <ErrorText error={couponError} /> : null}
       </div>
     </details>

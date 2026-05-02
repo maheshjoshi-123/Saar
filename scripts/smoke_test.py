@@ -31,6 +31,9 @@ def main() -> None:
     with TestClient(app) as client:
         health = client.get("/health")
         assert health.status_code == 200, health.text
+        root = client.get("/")
+        assert root.status_code == 200, root.text
+        assert root.json()["docs"] == "/docs", root.text
         ready = client.get("/ready")
         assert ready.status_code == 200, ready.text
 
@@ -43,6 +46,10 @@ def main() -> None:
         plans = client.get("/api/pricing/plans", headers=headers)
         assert plans.status_code == 200, plans.text
         assert len(plans.json()) >= 3, plans.text
+
+        models = client.get("/api/models", headers=headers)
+        assert models.status_code == 200, models.text
+        assert any(item["key"] == "wan22_t2v" for item in models.json()), models.text
 
         estimate = client.post(
             "/api/jobs/estimate",
@@ -60,6 +67,14 @@ def main() -> None:
         assert grant.status_code == 200, grant.text
         assert grant.json()["balance"] == 300, grant.text
 
+        subscription = client.post(
+            "/api/admin/billing/subscribe",
+            headers=admin_headers,
+            json={"user_id": "smoke-user", "plan_key": "starter", "cycles": 1, "payment_reference": "smoke"},
+        )
+        assert subscription.status_code == 200, subscription.text
+        assert subscription.json()["balance"] == 420, subscription.text
+
         coupon = client.post(
             "/api/admin/coupons",
             headers=admin_headers,
@@ -73,7 +88,7 @@ def main() -> None:
             json={"user_id": "smoke-user", "code": "SMOKE50"},
         )
         assert redeemed.status_code == 200, redeemed.text
-        assert redeemed.json()["balance"] == 350, redeemed.text
+        assert redeemed.json()["balance"] == 470, redeemed.text
 
         memory = client.post(
             "/api/memory",
@@ -165,6 +180,14 @@ def main() -> None:
             json={"prompt": "Animate this", "task_type": "image_to_video"},
         )
         assert invalid.status_code == 400, invalid.text
+
+        invalid_model = client.post(
+            "/api/jobs",
+            headers=headers,
+            json={"prompt": "Use a missing model", "task_type": "text_to_video_quality", "model_key": "missing-model", "user_id": "smoke-user"},
+        )
+        assert invalid_model.status_code == 400, invalid_model.text
+        assert "Model routing failed" in invalid_model.text, invalid_model.text
         print({"ok": True, "job": fetched.json()})
 
     if db_file.exists():

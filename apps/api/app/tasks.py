@@ -50,13 +50,23 @@ async def _process_job_async(job_id: str) -> None:
             "input_video_name": input_asset.r2_key.split("/")[-1] if input_asset else None,
         }
         workflow = load_workflow(endpoint.workflow_file, workflow_values)
+        input_files = []
         images = []
-        if input_asset and input_asset.type == AssetType.image:
-            images.append({"name": input_asset.r2_key.split("/")[-1], "url": presign_get(input_asset.r2_key)})
+        if input_asset and input_asset.type in {AssetType.image, AssetType.video, AssetType.audio}:
+            item = {
+                "name": input_asset.r2_key.split("/")[-1],
+                "url": presign_get(input_asset.r2_key),
+                "type": input_asset.type.value,
+                "mime_type": input_asset.mime_type,
+            }
+            input_files.append(item)
+            if input_asset.type == AssetType.image:
+                images.append(item)
 
         payload = {
             "workflow": workflow,
             "images": images,
+            "files": input_files,
             "metadata": {
                 "job_id": job.id,
                 "task_type": job.task_type.value,
