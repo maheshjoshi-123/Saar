@@ -152,9 +152,26 @@ def main() -> None:
         prompt_version = client.get(f"/api/jobs/{job['id']}/prompt-version", headers=headers)
         assert prompt_version.status_code == 200, prompt_version.text
         packet = prompt_version.json()["generation_packet"]
+        assert "active_context" in packet, prompt_version.text
         assert "subject_lock" in packet, prompt_version.text
         assert "continuity_rules" in packet, prompt_version.text
         assert "Do not allow hands" in " ".join(packet["negative_rules"]), prompt_version.text
+
+        preview = client.post(
+            "/api/context/preview",
+            headers=headers,
+            json={
+                "prompt": "A premium Facebook Reel for a grey curved-brim cap on a Kathmandu rooftop",
+                "task_type": "text_to_video_quality",
+                "user_id": "smoke-user",
+                "duration_seconds": 8,
+                "quality": "premium",
+                "options": {"product": "warm grey curved-brim cap", "location": "Kathmandu rooftop"},
+            },
+        )
+        assert preview.status_code == 200, preview.text
+        assert preview.json()["required_credits"] > job["required_credits"], preview.text
+        assert "active_context" in preview.json()["generation_packet"], preview.text
 
         qa = client.post(f"/api/jobs/{job['id']}/quality-report", headers=headers)
         assert qa.status_code == 200, qa.text

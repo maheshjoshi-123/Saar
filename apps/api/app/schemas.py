@@ -44,6 +44,32 @@ class CostEstimateResponse(BaseModel):
     has_enough_credits: bool | None = None
 
 
+class ContextPreviewRequest(BaseModel):
+    prompt: str = Field(min_length=1)
+    task_type: TaskType
+    negative_prompt: str | None = None
+    input_asset_id: str | None = None
+    user_id: str | None = None
+    model_key: str | None = None
+    duration_seconds: int = 6
+    quality: str = "standard"
+    options: dict = Field(default_factory=dict)
+
+
+class ContextPreviewResponse(BaseModel):
+    clean_brief: dict
+    generation_packet: dict
+    final_prompt: str
+    negative_prompt: str | None
+    complexity_score: int
+    complexity_decision: str
+    required_credits: int
+    estimated_gpu_seconds: int
+    price_breakdown: dict
+    user_balance: int | None = None
+    has_enough_credits: bool | None = None
+
+
 class PricingPlanIn(BaseModel):
     key: str
     name: str

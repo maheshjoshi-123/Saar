@@ -15,7 +15,7 @@ from .models import AssurancePlan, AssuranceStatus, Asset, AssetType, Coupon, Cr
 from .preflight import check_preflight
 from .r2 import presign_put, public_url_for_key
 from .router import list_available_endpoints, resolve_endpoint
-from .schemas import AssurancePlanResponse, ConfirmAssuranceRequest, CostEstimateRequest, CostEstimateResponse, CouponIn, CouponOut, CreditGrantRequest, CreateJobRequest, DesireIntakeRequest, FeedbackIn, JobEventResponse, JobResponse, LedgerResponse, MemoryItemIn, MemoryItemOut, ModelEndpointIn, ModelEndpointOut, PlanSubscribeRequest, PresignUploadRequest, PresignUploadResponse, PricingPlanIn, PricingPlanOut, PromptVersionResponse, QualityReportResponse, RedeemCouponRequest, RevisionRequestIn, RevisionRequestOut, UserTokenRequest, UserTokenResponse, WalletResponse
+from .schemas import AssurancePlanResponse, ConfirmAssuranceRequest, ContextPreviewRequest, ContextPreviewResponse, CostEstimateRequest, CostEstimateResponse, CouponIn, CouponOut, CreditGrantRequest, CreateJobRequest, DesireIntakeRequest, FeedbackIn, JobEventResponse, JobResponse, LedgerResponse, MemoryItemIn, MemoryItemOut, ModelEndpointIn, ModelEndpointOut, PlanSubscribeRequest, PresignUploadRequest, PresignUploadResponse, PricingPlanIn, PricingPlanOut, PromptVersionResponse, QualityReportResponse, RedeemCouponRequest, RevisionRequestIn, RevisionRequestOut, UserTokenRequest, UserTokenResponse, WalletResponse
 from .security import require_admin_token, require_api_token, require_user_scope, sign_user_token
 from .tasks import process_job
 
@@ -231,6 +231,45 @@ def estimate_job_cost(body: CostEstimateRequest, db: Session = Depends(get_db), 
     estimate = estimate_generation_cost(body.task_type, duration_seconds=body.duration_seconds, quality=body.quality, complexity_score=body.complexity_score, model_key=endpoint.key)
     wallet = get_wallet(db, body.user_id, create=True) if body.user_id else None
     return CostEstimateResponse(
+        **estimate,
+        user_balance=wallet.balance if wallet else None,
+        has_enough_credits=(wallet.balance >= estimate["required_credits"]) if wallet else None,
+    )
+
+
+@app.post("/api/context/preview", response_model=ContextPreviewResponse, dependencies=[Depends(require_api_token)])
+def preview_generation_context(body: ContextPreviewRequest, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> ContextPreviewResponse:
+    body.user_id = _scoped_user(body.user_id, x_saar_user_id, x_saar_user_token)
+    asset = db.get(Asset, body.input_asset_id) if body.input_asset_id else None
+    if body.input_asset_id and not asset:
+        raise HTTPException(status_code=400, detail="input_asset_id does not exist")
+    if asset and asset.user_id and body.user_id and asset.user_id != body.user_id:
+        raise HTTPException(status_code=403, detail="input_asset_id does not belong to this user")
+    try:
+        endpoint = resolve_endpoint(db, body.task_type, body.model_key)
+        compiled = compile_generation_context(
+            db,
+            raw_prompt=body.prompt,
+            task_type=body.task_type,
+            endpoint=endpoint,
+            input_asset=asset,
+            user_id=body.user_id,
+            project_id=body.options.get("project_id"),
+            explicit_negative=body.negative_prompt,
+            options={**body.options, "duration": f"{body.duration_seconds} seconds"},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Context preview failed: {exc}") from exc
+
+    estimate = estimate_generation_cost(body.task_type, duration_seconds=body.duration_seconds, quality=body.quality, complexity_score=compiled.complexity_score, model_key=endpoint.key)
+    wallet = get_wallet(db, body.user_id, create=True) if body.user_id else None
+    return ContextPreviewResponse(
+        clean_brief=compiled.clean_brief,
+        generation_packet=compiled.generation_packet,
+        final_prompt=compiled.final_prompt,
+        negative_prompt=compiled.negative_prompt,
+        complexity_score=compiled.complexity_score,
+        complexity_decision=compiled.complexity_decision,
         **estimate,
         user_balance=wallet.balance if wallet else None,
         has_enough_credits=(wallet.balance >= estimate["required_credits"]) if wallet else None,

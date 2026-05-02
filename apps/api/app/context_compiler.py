@@ -67,6 +67,7 @@ def compile_generation_context(
 
     packet = {
         "intent": clean_brief,
+        "active_context": build_active_context(clean_brief, subject_lock, visual_world, memories),
         "subject_lock": subject_lock,
         "visual_world": visual_world,
         "shot_grammar": shot_grammar,
@@ -94,7 +95,7 @@ def retrieve_memories(db: Session, *, user_id: str | None, project_id: str | Non
     if user_id:
         scopes.append(MemoryItem.user_id == user_id)
     if project_id:
-        scopes.append(MemoryItem.project_id == project_id)
+        scopes.append(and_(MemoryItem.project_id == project_id, or_(MemoryItem.user_id == user_id, MemoryItem.user_id.is_(None))))
     query = query.where(or_(*scopes))
     rows = db.execute(query.order_by(MemoryItem.priority.asc(), MemoryItem.created_at.desc()).limit(50)).scalars().all()
     prompt_words = set(tokenize(raw_prompt))
@@ -109,7 +110,9 @@ def retrieve_memories(db: Session, *, user_id: str | None, project_id: str | Non
     for row in rows:
         text_words = set(tokenize(row.content))
         relevance = 1 if not prompt_words else len(prompt_words & text_words)
-        if row.type in {MemoryType.critical, MemoryType.failure, MemoryType.subject} or relevance > 0 or row.priority <= 20:
+        always_include = row.type in {MemoryType.critical, MemoryType.failure, MemoryType.subject, MemoryType.brand}
+        planning_memory = row.type in {MemoryType.style, MemoryType.optional} and (row.user_id == user_id or row.project_id == project_id or row.priority <= 40)
+        if always_include or planning_memory or relevance > 0 or row.priority <= 20:
             target = {
                 MemoryType.critical: "critical_memory",
                 MemoryType.style: "style_memory",
@@ -139,6 +142,25 @@ def build_clean_brief(raw_prompt: str, task_type: TaskType, options: dict) -> di
         "audience": options.get("audience") or infer_audience(lower),
         "task_type": task_type.value,
         "style": style,
+    }
+
+
+def build_active_context(clean_brief: dict, subject_lock: dict, visual_world: dict, memories: dict) -> dict:
+    return {
+        "project": clean_brief.get("goal"),
+        "audience": clean_brief.get("audience"),
+        "style": clean_brief.get("style"),
+        "hero_subject": subject_lock.get("object"),
+        "location": visual_world.get("location"),
+        "hard_constraints": dedupe(
+            [
+                subject_lock.get("colour_rule", ""),
+                subject_lock.get("logo_rule", ""),
+                *subject_lock.get("shape_constraints", [])[:3],
+                *memories.get("critical_memory", [])[:3],
+                *memories.get("failure_memory", [])[:3],
+            ]
+        ),
     }
 
 

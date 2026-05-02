@@ -58,6 +58,20 @@ export type CostEstimate = {
   has_enough_credits?: boolean | null;
 };
 
+export type ContextPreview = {
+  clean_brief: Record<string, unknown>;
+  generation_packet: Record<string, unknown>;
+  final_prompt: string;
+  negative_prompt?: string | null;
+  complexity_score: number;
+  complexity_decision: string;
+  required_credits: number;
+  estimated_gpu_seconds: number;
+  price_breakdown: Record<string, unknown>;
+  user_balance?: number | null;
+  has_enough_credits?: boolean | null;
+};
+
 export type ModelEndpoint = {
   id: string;
   key: string;
