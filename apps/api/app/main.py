@@ -11,11 +11,14 @@ from .db import get_db, init_db
 from .assurance import build_options_from_assurance, confirm_assurance_plan, create_assurance_plan, create_quality_report, create_revision_request, store_feedback_memory
 from .billing import add_credits, debit_credits, estimate_generation_cost, get_wallet, redeem_coupon, refund_credits, seed_default_plans
 from .context_compiler import compile_generation_context
+from .generation_packet import build_generation_packet
+from .intelligence_memory import retrieve_structured_memory
 from .models import AssurancePlan, AssuranceStatus, Asset, AssetType, Coupon, CreditLedger, CreditWallet, Job, JobEvent, JobStatus, LedgerType, MemoryItem, ModelEndpoint, PricingPlan, PromptVersion, QualityReport, RevisionRequest, TaskType
 from .preflight import check_preflight
+from .prompt_refinement import build_intelligence_inputs
 from .r2 import presign_put, public_url_for_key
 from .router import list_available_endpoints, resolve_endpoint
-from .schemas import AssurancePlanResponse, ConfirmAssuranceRequest, ContextPreviewRequest, ContextPreviewResponse, CostEstimateRequest, CostEstimateResponse, CouponIn, CouponOut, CreditGrantRequest, CreateJobRequest, DesireIntakeRequest, FeedbackIn, JobEventResponse, JobResponse, LedgerResponse, MemoryItemIn, MemoryItemOut, ModelEndpointIn, ModelEndpointOut, PlanSubscribeRequest, PresignUploadRequest, PresignUploadResponse, PricingPlanIn, PricingPlanOut, PromptVersionResponse, QualityReportResponse, RedeemCouponRequest, RevisionRequestIn, RevisionRequestOut, UsageSummaryResponse, UserTokenRequest, UserTokenResponse, WalletResponse
+from .schemas import AssurancePlanResponse, ConfirmAssuranceRequest, ContextPreviewRequest, ContextPreviewResponse, CostEstimateRequest, CostEstimateResponse, CouponIn, CouponOut, CreditGrantRequest, CreateJobRequest, DesireIntakeRequest, FeedbackIn, IntelligencePacketRequest, IntelligencePacketResponse, JobEventResponse, JobResponse, LedgerResponse, MemoryItemIn, MemoryItemOut, ModelEndpointIn, ModelEndpointOut, PlanSubscribeRequest, PresignUploadRequest, PresignUploadResponse, PricingPlanIn, PricingPlanOut, PromptVersionResponse, QualityReportResponse, RedeemCouponRequest, RevisionRequestIn, RevisionRequestOut, UsageSummaryResponse, UserTokenRequest, UserTokenResponse, WalletResponse
 from .security import require_admin_token, require_api_token, require_user_scope, sign_user_token
 from .tasks import process_job
 
@@ -273,6 +276,36 @@ def preview_generation_context(body: ContextPreviewRequest, db: Session = Depend
         **estimate,
         user_balance=wallet.balance if wallet else None,
         has_enough_credits=(wallet.balance >= estimate["required_credits"]) if wallet else None,
+    )
+
+
+@app.post("/api/intelligence/packet", response_model=IntelligencePacketResponse, dependencies=[Depends(require_api_token)])
+def build_intelligence_packet(body: IntelligencePacketRequest, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> IntelligencePacketResponse:
+    user_id = _scoped_user(body.user_id, x_saar_user_id, x_saar_user_token)
+    memory = retrieve_structured_memory(db, user_id=user_id, project_id=body.project_id)
+    settings, active_context, brief = build_intelligence_inputs(body.raw_prompt, body.settings, memory)
+    packet = build_generation_packet(
+        user_id=user_id,
+        route=body.route,
+        raw_prompt=body.raw_prompt,
+        settings=settings,
+        memory=memory,
+        active_context=active_context,
+        brief=brief,
+        existing_scene_plan=body.scene_plan,
+        existing_keyframes=body.keyframes,
+        edit_scene_id=body.edit_scene_id,
+        scene_patch=body.scene_patch,
+        edit_keyframe_id=body.edit_keyframe_id,
+        keyframe_patch=body.keyframe_patch,
+    )
+    return IntelligencePacketResponse(
+        packet=packet,
+        quality_gate=packet["quality_gate"],
+        scene_plan=packet["scene_plan"],
+        reference_images=packet["reference_images"],
+        keyframes=packet["keyframes"],
+        final_video_prompt=packet["final_video_prompt"],
     )
 
 

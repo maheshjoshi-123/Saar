@@ -108,6 +108,125 @@ def main() -> None:
         )
         assert memory.status_code == 200, memory.text
 
+        direct_packet = client.post(
+            "/api/intelligence/packet",
+            headers=headers,
+            json={
+                "route": "direct_video",
+                "raw_prompt": "A premium Facebook Reel for a grey curved-brim cap on a Kathmandu rooftop, model adjusts the cap once",
+                "user_id": "smoke-user",
+                "settings": {
+                    "platform": "Facebook Reel",
+                    "duration_seconds": 6,
+                    "style": "Luxury",
+                    "pace": "Slow",
+                    "realism": "Natural",
+                    "audience": "young urban Nepalese consumers",
+                    "hero_subject": "warm grey curved-brim cap",
+                    "location": "Kathmandu rooftop",
+                },
+            },
+        )
+        assert direct_packet.status_code == 200, direct_packet.text
+        direct_body = direct_packet.json()
+        assert direct_body["packet"]["status"] == "ready_for_video_generator", direct_packet.text
+        assert direct_body["packet"]["raw_prompt"] != direct_body["packet"]["final_video_prompt"], direct_packet.text
+        assert direct_body["quality_gate"]["checks"]["negative_constraints_included"], direct_packet.text
+        assert "brand_rules" in direct_body["packet"], direct_packet.text
+
+        plan_packet = client.post(
+            "/api/intelligence/packet",
+            headers=headers,
+            json={
+                "route": "generate_plan",
+                "raw_prompt": "A premium Facebook Reel for a grey curved-brim cap on a Kathmandu rooftop, model adjusts the cap once",
+                "user_id": "smoke-user",
+                "settings": {
+                    "platform": "Facebook Reel",
+                    "duration_seconds": 6,
+                    "style": "Luxury",
+                    "pace": "Slow",
+                    "realism": "Natural",
+                    "audience": "young urban Nepalese consumers",
+                    "hero_subject": "warm grey curved-brim cap",
+                    "location": "Kathmandu rooftop",
+                },
+            },
+        )
+        assert plan_packet.status_code == 200, plan_packet.text
+        plan_body = plan_packet.json()
+        assert len(plan_body["scene_plan"]) == 2, plan_packet.text
+        assert len(plan_body["reference_images"]) == 2, plan_packet.text
+        assert len(plan_body["keyframes"]) >= 3, plan_packet.text
+        assert all(item["image_prompt"] for item in plan_body["keyframes"]), plan_packet.text
+        assert all(item["image_path"] for item in plan_body["keyframes"]), plan_packet.text
+        assert plan_body["quality_gate"]["checks"]["scene_references_included"], plan_packet.text
+        assert plan_body["quality_gate"]["checks"]["keyframes_included"], plan_packet.text
+
+        original_first_scene = plan_body["scene_plan"][0]["visual_description"]
+        original_first_keyframe = plan_body["keyframes"][0]["image_prompt"]
+        edited_plan = client.post(
+            "/api/intelligence/packet",
+            headers=headers,
+            json={
+                "route": "generate_plan",
+                "raw_prompt": "A premium Facebook Reel for a grey curved-brim cap on a Kathmandu rooftop, model adjusts the cap once",
+                "user_id": "smoke-user",
+                "settings": {
+                    "platform": "Facebook Reel",
+                    "duration_seconds": 6,
+                    "style": "Luxury",
+                    "pace": "Slow",
+                    "realism": "Natural",
+                    "audience": "young urban Nepalese consumers",
+                    "hero_subject": "warm grey curved-brim cap",
+                    "location": "Kathmandu rooftop",
+                },
+                "scene_plan": plan_body["scene_plan"],
+                "keyframes": plan_body["keyframes"],
+                "edit_scene_id": "scene-2",
+                "scene_patch": {
+                    "visual_description": "Hold the cap in a cleaner skyline frame with the front embroidery fully visible",
+                    "subject_action": "Hold the cap in a cleaner skyline frame with the front embroidery fully visible",
+                },
+            },
+        )
+        assert edited_plan.status_code == 200, edited_plan.text
+        edited_body = edited_plan.json()
+        assert edited_body["scene_plan"][0]["visual_description"] == original_first_scene, edited_plan.text
+        assert "cleaner skyline" in edited_body["scene_plan"][1]["visual_description"], edited_plan.text
+        assert "cleaner skyline" in edited_body["scene_plan"][1]["reference_image_prompt"], edited_plan.text
+        assert edited_body["keyframes"][0]["image_prompt"] == original_first_keyframe, edited_plan.text
+
+        revised_keyframe = client.post(
+            "/api/intelligence/packet",
+            headers=headers,
+            json={
+                "route": "generate_plan",
+                "raw_prompt": "A premium Facebook Reel for a grey curved-brim cap on a Kathmandu rooftop, model adjusts the cap once",
+                "user_id": "smoke-user",
+                "settings": {
+                    "platform": "Facebook Reel",
+                    "duration_seconds": 6,
+                    "style": "Luxury",
+                    "pace": "Slow",
+                    "realism": "Natural",
+                    "audience": "young urban Nepalese consumers",
+                    "hero_subject": "warm grey curved-brim cap",
+                    "location": "Kathmandu rooftop",
+                },
+                "scene_plan": edited_body["scene_plan"],
+                "keyframes": edited_body["keyframes"],
+                "edit_keyframe_id": edited_body["keyframes"][1]["keyframe_id"],
+                "keyframe_patch": {"image_prompt": "Revised keyframe showing the cap logo crisp and unobstructed"},
+            },
+        )
+        assert revised_keyframe.status_code == 200, revised_keyframe.text
+        revised_body = revised_keyframe.json()
+        assert revised_body["keyframes"][0]["image_prompt"] == original_first_keyframe, revised_keyframe.text
+        assert "crisp and unobstructed" in revised_body["keyframes"][1]["image_prompt"], revised_keyframe.text
+        assert revised_body["keyframes"][1]["history"], revised_keyframe.text
+
         intake = client.post(
             "/api/assurance/intake",
             headers=headers,

@@ -70,6 +70,29 @@ class ContextPreviewResponse(BaseModel):
     has_enough_credits: bool | None = None
 
 
+class IntelligencePacketRequest(BaseModel):
+    route: str = Field(pattern="^(direct_video|generate_plan)$")
+    raw_prompt: str = Field(min_length=1)
+    user_id: str | None = None
+    project_id: str | None = None
+    settings: dict = Field(default_factory=dict)
+    scene_plan: list[dict] = Field(default_factory=list)
+    keyframes: list[dict] = Field(default_factory=list)
+    edit_scene_id: str | None = None
+    scene_patch: dict = Field(default_factory=dict)
+    edit_keyframe_id: str | None = None
+    keyframe_patch: dict = Field(default_factory=dict)
+
+
+class IntelligencePacketResponse(BaseModel):
+    packet: dict
+    quality_gate: dict
+    scene_plan: list[dict]
+    reference_images: list[dict]
+    keyframes: list[dict] = Field(default_factory=list)
+    final_video_prompt: str
+
+
 class PricingPlanIn(BaseModel):
     key: str
     name: str

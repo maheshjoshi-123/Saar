@@ -16,8 +16,13 @@ async function proxy(request: NextRequest, context: RouteContext) {
   const target = new URL(backendPath, API_URL);
   request.nextUrl.searchParams.forEach((value, key) => target.searchParams.set(key, value));
 
-  const headers = new Headers(request.headers);
-  headers.delete("host");
+  const headers = new Headers();
+  const contentType = request.headers.get("content-type");
+  if (contentType) headers.set("content-type", contentType);
+  const scopedUser = request.headers.get("x-saar-user-id");
+  const scopedToken = request.headers.get("x-saar-user-token");
+  if (scopedUser) headers.set("x-saar-user-id", scopedUser);
+  if (scopedToken) headers.set("x-saar-user-token", scopedToken);
   const isAdminPath = backendPath.startsWith("/api/admin");
   const suppliedAdminKey = request.headers.get("x-saar-admin-key") || "";
   const token = isAdminPath && ADMIN_UI_KEY && suppliedAdminKey === ADMIN_UI_KEY ? ADMIN_TOKEN : API_TOKEN;

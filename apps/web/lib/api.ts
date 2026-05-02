@@ -84,6 +84,19 @@ export type ContextPreview = {
   has_enough_credits?: boolean | null;
 };
 
+export type IntelligencePacket = {
+  packet: Record<string, unknown>;
+  quality_gate: {
+    passed: boolean;
+    checks: Record<string, boolean>;
+    recommendations: string[];
+  };
+  scene_plan: Array<Record<string, unknown>>;
+  reference_images: Array<Record<string, unknown>>;
+  keyframes: Array<Record<string, unknown>>;
+  final_video_prompt: string;
+};
+
 export type ModelEndpoint = {
   id: string;
   key: string;
