@@ -5,6 +5,7 @@ from sqlalchemy import select
 from .config import get_settings
 from .db import SessionLocal
 from .billing import refund_credits
+from .media_pipeline import compressVideo, generatePosterFrame, transcodeForWeb, upscaleVideo
 from .models import Asset, AssetType, Job, JobEvent, JobStatus, PromptVersion
 from .router import resolve_endpoint
 from .runpod_client import RunPodClient
@@ -53,9 +54,10 @@ async def _process_job_async(job_id: str) -> None:
         input_files = []
         images = []
         if input_asset and input_asset.type in {AssetType.image, AssetType.video, AssetType.audio}:
+            input_url = input_asset.public_url if settings.runpod_mock and input_asset.public_url else presign_get(input_asset.r2_key)
             item = {
                 "name": input_asset.r2_key.split("/")[-1],
-                "url": presign_get(input_asset.r2_key),
+                "url": input_url,
                 "type": input_asset.type.value,
                 "mime_type": input_asset.mime_type,
             }
@@ -72,6 +74,11 @@ async def _process_job_async(job_id: str) -> None:
                 "task_type": job.task_type.value,
                 "output_prefix": f"outputs/{job.id}",
                 "generation_packet": generation_packet,
+                "routing": job.options.get("route_decision") if isinstance(job.options, dict) else None,
+                "postprocess": {
+                    "upscale": job.options.get("upscale_workflow") if isinstance(job.options, dict) else None,
+                    "compression": job.options.get("compression_workflow") if isinstance(job.options, dict) else None,
+                },
                 "complexity": generation_packet.get("complexity") if isinstance(generation_packet, dict) else None,
             },
         }
@@ -88,7 +95,7 @@ async def _process_job_async(job_id: str) -> None:
         add_event(db, job.id, "submitted", "Submitted job to RunPod", submitted)
 
         final_status = None
-        for _ in range(int(job.options.get("max_poll_attempts", 180))):
+        for _ in range(int(job.options.get("max_poll_attempts", 300))):
             await asyncio.sleep(int(job.options.get("poll_seconds", 10)))
             status = await client.status(endpoint.endpoint_id, runpod_job_id)
             final_status = status
@@ -117,12 +124,20 @@ async def _process_job_async(job_id: str) -> None:
         )
         db.add(asset)
         db.flush()
+        video_asset = {"asset_id": asset.id, "r2_key": asset.r2_key, "public_url": asset.public_url, "mime_type": asset.mime_type}
+        postprocess = {
+            "upscale": upscaleVideo(video_asset, job.options.get("upscale_workflow") if isinstance(job.options, dict) else None),
+            "compression": compressVideo(video_asset, job.options.get("compression_workflow") if isinstance(job.options, dict) else None),
+            "transcode": transcodeForWeb(video_asset, job.options.get("compression_workflow") if isinstance(job.options, dict) else None),
+            "poster": generatePosterFrame(video_asset, job.options.get("compression_workflow") if isinstance(job.options, dict) else None),
+        }
 
         job.output_asset_id = asset.id
+        job.options = {**(job.options or {}), "delivery": {"playback_url": output_url, "download_url": output_url}, "postprocess": postprocess}
         job.status = JobStatus.completed
         job.completed_at = datetime.utcnow()
         db.commit()
-        add_event(db, job.id, "completed", "Video generation completed", {"output_url": output_url})
+        add_event(db, job.id, "completed", "Video generation completed", {"output_url": output_url, "postprocess": postprocess})
     except Exception as exc:
         job = db.get(Job, job_id)
         if job:

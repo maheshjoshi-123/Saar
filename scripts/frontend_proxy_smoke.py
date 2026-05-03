@@ -11,15 +11,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "apps" / "web"
+sys.path.insert(0, str(ROOT))
+
+from scripts.runtime_paths import runtime_db  # noqa: E402
 
 
-def request(url: str, *, method: str = "GET", body: dict | None = None, timeout: int = 10) -> tuple[int, str]:
+def request(url: str, *, method: str = "GET", body: dict | None = None, timeout: int = 10, headers: dict | None = None) -> tuple[int, str]:
     data = None
-    headers = {}
+    request_headers = dict(headers or {})
     if body is not None:
         data = json.dumps(body).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+        request_headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, method=method, headers=request_headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as response:
             return response.status, response.read().decode("utf-8")
@@ -52,10 +55,12 @@ def main() -> None:
     api_url = f"http://127.0.0.1:{api_port}"
     web_url = f"http://127.0.0.1:{web_port}"
 
+    db_file = runtime_db("saar_frontend_proxy_smoke.db")
+
     api_env = os.environ.copy()
     api_env.update(
         {
-            "DATABASE_URL": "sqlite:///./saar_frontend_proxy_smoke.db",
+            "DATABASE_URL": f"sqlite:///{db_file.as_posix()}",
             "QUEUE_MODE": "inline",
             "RUNPOD_MOCK": "true",
             "WORKFLOW_DIR": "workflows",
@@ -71,10 +76,10 @@ def main() -> None:
             "SAAR_API_URL": api_url,
             "SAAR_API_TOKEN": "frontend-smoke-api-token",
             "SAAR_ADMIN_TOKEN": "frontend-smoke-admin-token",
+            "SAAR_ADMIN_UI_KEY": "frontend-admin-key",
         }
     )
 
-    db_file = ROOT / "saar_frontend_proxy_smoke.db"
     if db_file.exists():
         db_file.unlink()
 
@@ -90,6 +95,12 @@ def main() -> None:
 
         status, body = request(f"{web_url}/api/proxy/api/pricing/plans")
         assert status == 200 and "Starter" in body, body
+
+        status, body = request(f"{web_url}/api/proxy/api/admin/usage/summary")
+        assert status == 403, body
+
+        status, body = request(f"{web_url}/api/proxy/api/admin/usage/summary", headers={"x-saar-admin-key": "frontend-admin-key"})
+        assert status == 200 and "total_jobs" in body, body
 
         status, body = request(
             f"{web_url}/api/proxy/api/jobs/estimate",

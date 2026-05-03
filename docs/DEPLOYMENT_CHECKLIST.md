@@ -78,7 +78,7 @@ USER_AUTH_SECRET
 
 ## 4. Replace Workflow Placeholders
 
-The files in `workflows/` are contract placeholders. Before live GPU deployment:
+The files in `workflows/` may be contract placeholders. Real ComfyUI API workflow JSON exports are required before production rendering. Do not edit these placeholder JSON files casually; replace each file later with a real ComfyUI API export for the matching model/task.
 
 1. Open ComfyUI.
 2. Load the real Wan/LTX/Hunyuan/upscale workflow.
@@ -90,6 +90,8 @@ The files in `workflows/` are contract placeholders. Before live GPU deployment:
    - `"{{seed}}"`
    - `"{{input_image_name}}"`
    - `"{{input_video_name}}"`
+
+Run `python scripts/preflight.py` after replacement. The `real_workflows` check should stop reporting placeholder files, and `workflow_contract` should still report parseable ComfyUI API graphs.
 
 ## 5. Production Preflight
 

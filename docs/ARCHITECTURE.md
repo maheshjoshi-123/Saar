@@ -24,6 +24,8 @@
 
 ## Real ComfyUI Workflow Setup
 
+The repository may include placeholder workflow JSON files so local smoke tests can validate the contract shape. Real ComfyUI API workflow JSON exports are required before production rendering.
+
 1. Build and test workflow in ComfyUI.
 2. Use `Workflow > Export (API)`.
 3. Place JSON into `workflows/`.

@@ -1,3 +1,4 @@
+import re
 from .intelligence_context import build_active_context, fill_settings
 from .ollama_client import ollama_json
 
@@ -44,10 +45,11 @@ def refine_direct_prompt(raw_prompt: str, settings: dict, active_context: dict, 
 
 
 def create_scene_plan(raw_prompt: str, settings: dict, active_context: dict, memory: dict) -> list[dict]:
+    expected_count = desired_scene_count(raw_prompt, settings["duration_seconds"])
     local = ollama_json(
         "Return JSON only in this exact shape: "
         "{\"scenes\":[{\"title\":\"\",\"visual_description\":\"\",\"camera\":\"\",\"motion\":\"\",\"lighting\":\"\",\"subject_action\":\"\",\"reference_image_prompt\":\"\",\"negative_prompt\":\"\"}]} "
-        "Create a detailed realistic video plan for the prompt. Use 2 scenes for <=6 seconds, 3 scenes for <=10 seconds, 4 scenes for longer. "
+        f"Create a detailed realistic video plan for the prompt. Use exactly {expected_count} scenes unless the prompt explicitly requested another count. "
         "Keep actions simple and product-safe. Include strong continuity, subject lock, and negative prompts. "
         f"Raw prompt: {raw_prompt}\nSettings: {settings}\nActive context: {active_context}\nMemory: {memory}"
     )
@@ -57,14 +59,14 @@ def create_scene_plan(raw_prompt: str, settings: dict, active_context: dict, mem
             return scenes
 
     duration = settings["duration_seconds"]
-    scene_count = 2 if duration <= 6 else 3 if duration <= 10 else 4
+    scene_count = expected_count
     base = max(2, round(duration / scene_count))
     scenes = []
     for index in range(scene_count):
         scene_number = index + 1
         is_first = index == 0
         is_last = index == scene_count - 1
-        title = "Opening hook" if is_first else "Product lock" if is_last else f"Scene {scene_number}"
+        title = scene_title_for(scene_number, scene_count)
         visual = (
             f"{settings['hero_subject']} clearly visible in {settings['location']}"
             if is_first
@@ -92,13 +94,16 @@ def create_scene_plan(raw_prompt: str, settings: dict, active_context: dict, mem
 
 def normalize_ollama_scenes(raw_scenes: list, raw_prompt: str, settings: dict, active_context: dict, memory: dict) -> list[dict]:
     duration = settings["duration_seconds"]
-    expected = 2 if duration <= 6 else 3 if duration <= 10 else 4
+    expected = desired_scene_count(raw_prompt, duration)
     base = max(2, round(duration / expected))
     scenes = []
-    for index, item in enumerate(raw_scenes[:expected]):
+    source = list(raw_scenes[:expected])
+    while source and len(source) < expected:
+        source.append(source[-1])
+    for index, item in enumerate(source):
         if not isinstance(item, dict):
             continue
-        title = str(item.get("title") or f"Scene {index + 1}")
+        title = str(item.get("title") or scene_title_for(index + 1, expected))
         visual = str(item.get("visual_description") or item.get("description") or f"Controlled supporting action for: {raw_prompt.strip()}")
         camera = str(item.get("camera") or camera_for_pace(settings["pace"]))
         motion = str(item.get("motion") or "single controlled motion; no fast cuts")
@@ -121,6 +126,38 @@ def normalize_ollama_scenes(raw_scenes: list, raw_prompt: str, settings: dict, a
         }
         scenes.append(scene)
     return scenes
+
+
+def desired_scene_count(raw_prompt: str, duration: int) -> int:
+    explicit = explicit_scene_count(raw_prompt)
+    if explicit:
+        return max(1, min(explicit, 12))
+    if duration <= 6:
+        return 3
+    if duration <= 9:
+        return 4
+    if duration <= 15:
+        return 5
+    return max(5, min(8, round(duration / 4)))
+
+
+def explicit_scene_count(raw_prompt: str) -> int | None:
+    match = re.search(r"\b(?:use|make|create|generate|with|in)?\s*(\d{1,2})\s+(?:scene|scenes|shots|keyframes)\b", raw_prompt.lower())
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def scene_title_for(scene_number: int, total: int) -> str:
+    if scene_number == 1:
+        return "Opening hook"
+    if scene_number == total:
+        return "Final hero"
+    if scene_number == 2:
+        return "Product proof"
+    if scene_number == 3 and total >= 4:
+        return "Lifestyle context"
+    return f"Scene {scene_number}"
 
 
 def update_scene_part(scene_plan: list[dict], scene_id: str, patch: dict, settings: dict, active_context: dict, memory: dict) -> list[dict]:

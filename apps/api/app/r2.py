@@ -61,3 +61,40 @@ def presign_get(key: str, expires: int = 3600) -> str:
 
 def guess_content_type(filename: str) -> str:
     return mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+
+def getPlaybackUrl(key: str | None = None, public_url: str | None = None) -> str | None:
+    return public_url or (public_url_for_key(key) if key else None)
+
+
+def getDownloadUrl(key: str | None = None, public_url: str | None = None) -> str | None:
+    if public_url:
+        return public_url
+    if not key:
+        return None
+    try:
+        return presign_get(key)
+    except RuntimeError:
+        return None
+
+
+def getThumbnailUrl(key: str | None = None, public_url: str | None = None) -> str | None:
+    return public_url or (public_url_for_key(key) if key else None)
+
+
+def uploadGeneratedAssetToCloudflare(*, key: str, content_type: str) -> dict:
+    return {
+        "r2_key": key,
+        "upload_url": presign_put(key, content_type),
+        "public_url": public_url_for_key(key),
+        "playback_url": getPlaybackUrl(key=key),
+        "download_url": getDownloadUrl(key=key),
+    }
+
+
+def uploadVideoToCloudflare(*, key: str, content_type: str = "video/mp4") -> dict:
+    return uploadGeneratedAssetToCloudflare(key=key, content_type=content_type)
+
+
+def uploadImageToCloudflare(*, key: str, content_type: str = "image/png") -> dict:
+    return uploadGeneratedAssetToCloudflare(key=key, content_type=content_type)

@@ -5,7 +5,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-os.environ["DATABASE_URL"] = "sqlite:///./saar_security_smoke.db"
+from scripts.runtime_paths import runtime_db  # noqa: E402
+
+SECURITY_DB = runtime_db("saar_security_smoke.db")
+os.environ["DATABASE_URL"] = f"sqlite:///{SECURITY_DB.as_posix()}"
 os.environ["QUEUE_MODE"] = "inline"
 os.environ["RUNPOD_MOCK"] = "true"
 os.environ["WORKFLOW_DIR"] = "workflows"
@@ -25,7 +28,7 @@ from apps.api.app.models import Asset, AssetType  # noqa: E402
 
 
 def main() -> None:
-    db_file = Path("saar_security_smoke.db")
+    db_file = SECURITY_DB
     engine.dispose()
     if db_file.exists():
         db_file.unlink()

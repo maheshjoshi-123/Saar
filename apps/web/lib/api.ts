@@ -9,6 +9,7 @@ export type TaskType =
 
 export type Job = {
   id: string;
+  user_id?: string | null;
   task_type: TaskType;
   status: "queued" | "running" | "submitted" | "uploading" | "completed" | "failed" | "cancelled";
   prompt: string;
@@ -19,6 +20,9 @@ export type Job = {
   input_asset_id?: string | null;
   output_asset_id?: string | null;
   output_url?: string | null;
+  video_url?: string | null;
+  playbackUrl?: string | null;
+  cloudflareUrl?: string | null;
   complexity_score?: number | null;
   complexity_decision?: string | null;
   required_credits?: number | null;
@@ -55,6 +59,7 @@ export type AuthSession = {
   token: string;
   name?: string | null;
   demo: boolean;
+  tier?: string | null;
 };
 
 export type UsageSummary = {
@@ -198,6 +203,26 @@ export type RevisionRequest = {
   created_at: string;
 };
 
+export type PaymentRequest = {
+  id: string;
+  user_id: string;
+  plan_key: string;
+  amount_npr: number;
+  credits: number;
+  payment_method: string;
+  transaction_id: string;
+  status: "pending" | "approved" | "rejected";
+  admin_notes?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type UploadedAsset = {
+  asset_id: string;
+  r2_key?: string | null;
+  public_url?: string | null;
+};
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
@@ -228,15 +253,17 @@ export function userHeaders(userId: string, userToken: string): HeadersInit {
   return userId && userToken ? { "x-saar-user-id": userId, "x-saar-user-token": userToken } : {};
 }
 
-export async function uploadAsset(file: File, userId?: string, userToken?: string): Promise<string> {
-  const presign = await api<{ asset_id: string; upload_url: string }>("/api/assets/presign-upload", {
+export async function uploadAsset(file: File, userId?: string, userToken?: string): Promise<UploadedAsset> {
+  // TODO: backend AssetType has no generic "file" value yet; PDFs are uploaded as reference assets with their MIME preserved.
+  const assetType = file.type.startsWith("video/") ? "video" : "image";
+  const presign = await api<{ asset_id: string; upload_url: string; r2_key?: string | null; public_url?: string | null }>("/api/assets/presign-upload", {
     method: "POST",
     headers: userHeaders(userId || "", userToken || ""),
     body: JSON.stringify({
       filename: file.name,
       content_type: file.type || "application/octet-stream",
       file_size: file.size,
-      asset_type: file.type.startsWith("video/") ? "video" : file.type.startsWith("audio/") ? "audio" : "image",
+      asset_type: assetType,
       user_id: userId || null,
     }),
   });
@@ -248,5 +275,5 @@ export async function uploadAsset(file: File, userId?: string, userToken?: strin
   if (!upload.ok) {
     throw new Error("Upload to R2 failed");
   }
-  return presign.asset_id;
+  return { asset_id: presign.asset_id, r2_key: presign.r2_key, public_url: presign.public_url };
 }

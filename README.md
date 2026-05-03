@@ -28,8 +28,13 @@ apps/web Next.js
 apps/
   api/                 FastAPI app, SQLAlchemy models, RunPod/R2 clients
   web/                 Next.js dashboard
+docs/                  Architecture, deployment, security, audit, and QA notes
 infra/
   docker-compose.yml   Local Postgres + Redis + API + worker + web
+scripts/               Local smoke, preflight, security, and QA validation scripts
+var/
+  db/                  Ignored local SQLite/runtime databases
+  logs/                Ignored local development logs
 workers/
   runpod-comfyui/      Deployable RunPod ComfyUI serverless worker
 workflows/

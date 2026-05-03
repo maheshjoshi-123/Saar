@@ -42,7 +42,7 @@ def inspect_workflow_template(filename: str) -> dict:
             if node_count == 0:
                 issues.append("workflow has no ComfyUI API nodes")
             if "_description" in parsed:
-                issues.append("placeholder workflow must be replaced before production")
+                issues.append("Real ComfyUI API workflow JSON exports are required before production rendering.")
     except json.JSONDecodeError as exc:
         issues.append(f"invalid JSON: {exc.msg}")
 

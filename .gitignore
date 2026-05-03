@@ -11,9 +11,14 @@ __pycache__/
 .venv/
 venv/
 *.pyc
+*.log
+*.tsbuildinfo
 *.sqlite3
 *.db
 outputs/
 tmp/
+var/db/*
+var/logs/*
+!var/db/.gitkeep
+!var/logs/.gitkeep
 .DS_Store
-

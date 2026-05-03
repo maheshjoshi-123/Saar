@@ -4,6 +4,9 @@ from textwrap import wrap
 from .config import get_settings
 
 
+IMAGE_STATUS_PLACEHOLDER = "placeholder"
+
+
 def build_keyframes(scene_plan: list[dict], settings: dict, active_context: dict, memory: dict, existing_keyframes: list[dict] | None = None) -> list[dict]:
     if existing_keyframes:
         return existing_keyframes
@@ -18,7 +21,7 @@ def build_keyframes(scene_plan: list[dict], settings: dict, active_context: dict
         timestamp = timestamp_for(index, len(selected), duration)
         description = description_for_keyframe(index, len(selected), scene, settings)
         image_prompt = build_keyframe_prompt(description, scene, settings, active_context)
-        image = generate_reference_image(image_prompt, scene.get("negative_prompt") or negative_prompt(memory), settings, f"keyframe-{index + 1}")
+        image = generateKeyframeImage(scene, image_prompt, scene.get("negative_prompt") or negative_prompt(memory), settings)
         keyframes.append(
             {
                 "keyframe_id": f"keyframe-{index + 1}",
@@ -29,6 +32,8 @@ def build_keyframes(scene_plan: list[dict], settings: dict, active_context: dict
                 "negative_prompt": scene.get("negative_prompt") or negative_prompt(memory),
                 "status": "draft",
                 "image_path": image["image_path"],
+                "image_status": image["status"],
+                "image_mode": image["mode"],
                 "history": [],
             }
         )
@@ -49,7 +54,7 @@ def regenerate_scene_keyframes(scene_plan: list[dict], keyframes: list[dict], sc
             continue
         description = description_for_keyframe(0, 1, scene, settings)
         prompt = build_keyframe_prompt(description, scene, settings, active_context)
-        image = generate_reference_image(prompt, scene.get("negative_prompt") or negative_prompt(memory), settings, keyframe.get("keyframe_id", "keyframe"))
+        image = generateSceneKeyframe(scene, prompt, scene.get("negative_prompt") or negative_prompt(memory), settings)
         regenerated.append(
             {
                 **keyframe,
@@ -58,6 +63,8 @@ def regenerate_scene_keyframes(scene_plan: list[dict], keyframes: list[dict], sc
                 "negative_prompt": scene.get("negative_prompt") or negative_prompt(memory),
                 "status": "revised",
                 "image_path": image["image_path"],
+                "image_status": image["status"],
+                "image_mode": image["mode"],
                 "history": [*keyframe.get("history", []), snapshot_keyframe(keyframe)],
             }
         )
@@ -76,22 +83,40 @@ def update_keyframe_part(keyframes: list[dict], keyframe_id: str, patch: dict, s
         next_keyframe = {**keyframe, **{key: value for key, value in patch.items() if value is not None}}
         if "image_prompt" in patch or "description" in patch:
             prompt = next_keyframe.get("image_prompt") or next_keyframe.get("description") or ""
-            image = regenerate_reference_image(keyframe_id, prompt, next_keyframe.get("negative_prompt", ""), settings)
+            image = regenerateSceneKeyframe(keyframe_id, prompt, next_keyframe.get("negative_prompt", ""), settings)
             next_keyframe["image_path"] = image["image_path"]
+            next_keyframe["image_status"] = image["status"]
+            next_keyframe["image_mode"] = image["mode"]
             next_keyframe["status"] = "revised"
             next_keyframe["history"] = [*keyframe.get("history", []), snapshot_keyframe(keyframe)]
         updated.append(next_keyframe)
     return updated
 
 
+def generateKeyframeImage(scene: dict, scene_prompt: str, negative_prompt: str, settings: dict) -> dict:
+    """Generate a scene keyframe through the configured local image adapter, with a safe placeholder fallback."""
+    # TODO: Add a local image adapter for FLUX.1 schnell, SDXL, or ComfyUI when a local endpoint is configured.
+    # The current repo has ComfyUI video workflow templates, but no stable local image-generation API/client.
+    return generate_reference_image(scene_prompt, negative_prompt, settings, scene.get("id", scene.get("scene_number", "keyframe")))
+
+
+def generateSceneKeyframe(scene: dict, packet_or_prompt: dict | str, assets: list | str | None = None, settings: dict | None = None) -> dict:
+    prompt = packet_or_prompt if isinstance(packet_or_prompt, str) else str(packet_or_prompt.get("reference_image_prompt") or packet_or_prompt.get("image_prompt") or "")
+    negative = assets if isinstance(assets, str) else ""
+    return generateKeyframeImage(scene, prompt, negative, settings or {})
+
+
+def regenerateSceneKeyframe(scene_id: str, revision_prompt: str, negative_prompt: str = "", settings: dict | None = None) -> dict:
+    return generate_reference_image(revision_prompt, negative_prompt, settings or {}, f"{scene_id}-revised")
+
+
 def generate_reference_image(prompt: str, negative_prompt: str, settings: dict, keyframe_id: str) -> dict:
-    # TODO: Connect a local image model adapter here when available, such as SDXL, FLUX, RealVisXL, or Juggernaut XL.
-    # Ollama is used for local text intelligence; it does not provide an installed image-generation model here.
-    # This creates a local visual reference card so QA and approval flows exercise real image paths without video rendering.
+    # Fallback placeholder: clear status, real file path, no heavy local model imports, no production model changes.
     safe_id = str(keyframe_id).replace("/", "-").replace("\\", "-")
     image_path = write_reference_svg(prompt, negative_prompt, settings, safe_id)
     return {
-        "mode": "local_svg_placeholder",
+        "mode": "local_placeholder",
+        "status": IMAGE_STATUS_PLACEHOLDER,
         "image_path": image_path,
         "prompt": prompt,
         "negative_prompt": negative_prompt,
@@ -99,7 +124,7 @@ def generate_reference_image(prompt: str, negative_prompt: str, settings: dict, 
 
 
 def regenerate_reference_image(keyframe_id: str, revised_prompt: str, negative_prompt: str, settings: dict) -> dict:
-    return generate_reference_image(revised_prompt, negative_prompt, settings, f"{keyframe_id}-revised")
+    return regenerateSceneKeyframe(keyframe_id, revised_prompt, negative_prompt, settings)
 
 
 def select_keyframe_scenes(scene_plan: list[dict], target_count: int) -> list[dict]:
@@ -130,11 +155,12 @@ def description_for_keyframe(index: int, total: int, scene: dict, settings: dict
 
 def build_keyframe_prompt(description: str, scene: dict, settings: dict, active_context: dict) -> str:
     return (
-        f"{settings.get('aspect_ratio', '9:16')} reference keyframe, {settings.get('style', 'Luxury')} "
-        f"{settings.get('realism', 'Natural')} commercial image. {description}. "
-        f"Scene: {scene.get('title')}. Camera: {scene.get('camera')}. Lighting: {scene.get('lighting')}. "
-        f"World: {active_context.get('visual_world')}. Preserve product identity, colour, shape, logo placement, "
-        f"material texture, clean mobile-first framing, no extra text."
+        f"{settings.get('aspect_ratio', '9:16')} photorealistic ad-quality keyframe for video generation. "
+        f"{description}. Hero product/subject lock: {settings.get('hero_subject', 'main subject')}; preserve exact colour, "
+        f"shape, logo or mark placement, material texture, readable details, and identity from references. "
+        f"Scene: {scene.get('title')}. Camera: {scene.get('camera')}. Motion cue: {scene.get('motion')}. "
+        f"Lighting: {scene.get('lighting')}. Location/world: {active_context.get('visual_world')}. "
+        f"Commercial composition, realistic lens depth, natural skin/material rendering, clean mobile-first frame, no extra text."
     )
 
 

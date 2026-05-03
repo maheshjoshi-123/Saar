@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel, Field
-from .models import AssuranceStatus, AssetType, JobStatus, LedgerType, MemoryType, TaskType
+from .models import AssuranceStatus, AssetType, JobStatus, LedgerType, MemoryType, PaymentRequestStatus, TaskType
 
 
 class PresignUploadRequest(BaseModel):
@@ -137,6 +137,7 @@ class AuthSessionResponse(BaseModel):
     token: str
     name: str | None = None
     demo: bool = True
+    tier: str = "pro"
 
 
 class CreditGrantRequest(BaseModel):
@@ -152,6 +153,34 @@ class PlanSubscribeRequest(BaseModel):
     payment_reference: str | None = Field(default=None, max_length=240)
 
 
+class PaymentRequestIn(BaseModel):
+    user_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.@:-]+$")
+    plan_key: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_.:-]+$")
+    transaction_id: str = Field(min_length=1, max_length=240)
+    payment_method: str = Field(default="esewa", max_length=40)
+
+
+class PaymentRequestOut(BaseModel):
+    id: str
+    user_id: str
+    plan_key: str
+    amount_npr: int
+    credits: int
+    payment_method: str
+    transaction_id: str
+    status: PaymentRequestStatus
+    admin_notes: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PaymentRequestReview(BaseModel):
+    status: PaymentRequestStatus
+    admin_notes: str | None = Field(default=None, max_length=1000)
+
+
 class UserTokenRequest(BaseModel):
     user_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.@:-]+$")
 
@@ -164,7 +193,7 @@ class UserTokenResponse(BaseModel):
 class CouponIn(BaseModel):
     code: str = Field(min_length=3, max_length=48, pattern=r"^[A-Za-z0-9_-]+$")
     description: str | None = Field(default=None, max_length=240)
-    credit_amount: int = Field(ge=0, le=1_000_000)
+    credit_amount: int = Field(default=0, ge=0, le=1_000_000)
     percent_bonus: int = Field(default=0, ge=0, le=100)
     max_redemptions: int | None = Field(default=None, ge=1, le=1_000_000)
     expires_at: datetime | None = None
@@ -209,6 +238,33 @@ class UsageSummaryResponse(BaseModel):
     jobs_by_task: dict
     jobs_by_model: dict
     credits_by_user: dict
+
+
+class AdminUserSummary(BaseModel):
+    user_id: str
+    name: str | None = None
+    role: str | None = None
+    wallet_balance: int = 0
+    lifetime_credits: int = 0
+    lifetime_spent: int = 0
+    total_jobs: int = 0
+    completed_jobs: int = 0
+    failed_jobs: int = 0
+    last_job_at: datetime | None = None
+    created_at: datetime | None = None
+
+
+class AssetResponse(BaseModel):
+    id: str
+    user_id: str | None
+    type: AssetType
+    r2_key: str
+    public_url: str | None
+    file_size: int | None
+    mime_type: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 class DesireIntakeRequest(BaseModel):
@@ -333,6 +389,7 @@ class JobEventResponse(BaseModel):
 
 class JobResponse(BaseModel):
     id: str
+    user_id: str | None = None
     task_type: TaskType
     status: JobStatus
     prompt: str
@@ -343,6 +400,10 @@ class JobResponse(BaseModel):
     input_asset_id: str | None
     output_asset_id: str | None
     output_url: str | None
+    playbackUrl: str | None = None
+    cloudflareUrl: str | None = None
+    download_url: str | None = None
+    thumbnail_url: str | None = None
     complexity_score: int | None = None
     complexity_decision: str | None = None
     required_credits: int | None = None

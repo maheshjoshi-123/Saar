@@ -5,7 +5,7 @@ const API_TOKEN = process.env.SAAR_API_TOKEN || "";
 const ADMIN_TOKEN = process.env.SAAR_ADMIN_TOKEN || "";
 const ADMIN_UI_KEY = process.env.SAAR_ADMIN_UI_KEY || "";
 const MAX_BODY_BYTES = Number(process.env.SAAR_PROXY_MAX_BODY_BYTES || 2_000_000);
-const ALLOWED_METHODS = new Set(["GET", "HEAD", "POST", "PATCH"]);
+const ALLOWED_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH"]);
 
 type RouteContext = {
   params: Promise<{ path: string[] }>;
@@ -63,7 +63,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
       body,
       cache: "no-store",
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       {
         detail: "Saar API is unavailable",

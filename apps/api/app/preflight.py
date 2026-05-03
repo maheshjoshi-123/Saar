@@ -7,6 +7,7 @@ from .workflows import inspect_workflow_template
 
 
 PLACEHOLDER_MARKER = "_description"
+PLACEHOLDER_WORKFLOW_WARNING = "Real ComfyUI API workflow JSON exports are required before production rendering."
 
 
 def check_preflight(settings: Settings | None = None) -> dict:
@@ -60,7 +61,7 @@ def check_preflight(settings: Settings | None = None) -> dict:
             inspection = inspect_workflow_template(path.name)
             if not inspection["valid_json"] or inspection["node_count"] == 0:
                 invalid_workflows.append(path.name)
-    add("real_workflows", not placeholder_files, "Replace placeholder workflows: " + ", ".join(placeholder_files) if placeholder_files else "Workflow files do not contain placeholder marker")
+    add("real_workflows", not placeholder_files, f"{PLACEHOLDER_WORKFLOW_WARNING} Placeholder files: {', '.join(placeholder_files)}" if placeholder_files else "Workflow files do not contain placeholder marker")
     add("workflow_contract", not invalid_workflows, "Invalid workflow contract: " + ", ".join(invalid_workflows) if invalid_workflows else "Workflow JSON files are parseable API graphs")
 
     try:

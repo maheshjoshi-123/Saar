@@ -59,6 +59,12 @@ class LedgerType(str, enum.Enum):
     adjustment = "adjustment"
 
 
+class PaymentRequestStatus(str, enum.Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -274,6 +280,22 @@ class JobEvent(Base):
     message: Mapped[str] = mapped_column(Text)
     meta: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class PaymentRequest(Base):
+    __tablename__ = "payment_requests"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    plan_key: Mapped[str] = mapped_column(String)
+    amount_npr: Mapped[int] = mapped_column(Integer)
+    credits: Mapped[int] = mapped_column(Integer)
+    payment_method: Mapped[str] = mapped_column(String, default="esewa")
+    transaction_id: Mapped[str] = mapped_column(String, index=True)
+    status: Mapped[PaymentRequestStatus] = mapped_column(Enum(PaymentRequestStatus), default=PaymentRequestStatus.pending, index=True)
+    admin_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 Index("idx_jobs_status_created", Job.status, Job.created_at)

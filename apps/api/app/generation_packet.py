@@ -2,6 +2,129 @@ from .prompt_refinement import create_scene_plan, refine_direct_prompt, update_s
 from .reference_images import build_keyframes, regenerate_scene_keyframes, update_keyframe_part
 
 
+def compact_asset_summary(asset: dict) -> dict:
+    return {
+        "asset_id": asset.get("asset_id") or asset.get("id"),
+        "url": asset.get("public_url") or asset.get("url"),
+        "r2_key": asset.get("r2_key"),
+        "type": asset.get("type") or asset.get("mime_type"),
+        "mime_type": asset.get("mime_type") or asset.get("type"),
+        "name": asset.get("name") or asset.get("filename"),
+    }
+
+
+def normalise_generation_packet(
+    *,
+    base_packet: dict,
+    task_type: str,
+    route_decision: dict | None = None,
+    input_assets: list[dict] | None = None,
+    output_settings: dict | None = None,
+    upscale_workflow: dict | None = None,
+    compression_workflow: dict | None = None,
+) -> dict:
+    settings = base_packet.get("settings") or {}
+    compact_assets = [compact_asset_summary(item) for item in (input_assets or settings.get("attachments") or []) if isinstance(item, dict)]
+    reference_images = [item for item in compact_assets if str(item.get("mime_type") or item.get("type") or "").startswith("image/")]
+    reference_videos = [item for item in compact_assets if str(item.get("mime_type") or item.get("type") or "").startswith("video/")]
+    uploaded_files = [item for item in compact_assets if item not in reference_images and item not in reference_videos]
+    normalized = {
+        "schema_version": "saar.generation_packet.v1",
+        "user": {
+            "user_id": base_packet.get("user_id"),
+            "project_id": settings.get("project_id") or base_packet.get("project_id"),
+        },
+        "route": {
+            "type": base_packet.get("route"),
+            "task_type": task_type,
+            "decision": route_decision or {},
+        },
+        "prompt": {
+            "raw": base_packet.get("raw_prompt"),
+            "refined": base_packet.get("refined_prompt"),
+            "final": base_packet.get("final_video_prompt"),
+            "negative": ", ".join(base_packet.get("negative_constraints") or []),
+        },
+        "creative": {
+            "platform": settings.get("platform"),
+            "duration_seconds": settings.get("duration_seconds"),
+            "style": settings.get("style"),
+            "pace": settings.get("pace"),
+            "realism": settings.get("realism"),
+            "aspect_ratio": settings.get("aspect_ratio", "9:16"),
+            "scene_plan": base_packet.get("scene_plan") or [],
+            "keyframes": base_packet.get("keyframes") or [],
+            "keyframe_prompts": [item.get("image_prompt") for item in base_packet.get("keyframes", []) if item.get("image_prompt")],
+        },
+        "assets": {
+            "reference_images": reference_images,
+            "reference_videos": reference_videos,
+            "uploaded_files": uploaded_files,
+            "reference_image_paths": base_packet.get("reference_image_paths") or [],
+            "compact_assets": compact_assets,
+        },
+        "context": {
+            "memory": base_packet.get("memory_used") or {},
+            "persona": settings.get("persona") or {},
+            "active_context": base_packet.get("active_context") or {},
+            "reference_lock": settings.get("reference_lock") or {},
+            "brand_rules": base_packet.get("brand_rules") or [],
+        },
+        "output": {
+            **(output_settings or {}),
+            "upscale": upscale_workflow,
+            "compression": compression_workflow,
+        },
+        "quality_gate": base_packet.get("quality_gate") or {},
+        "approved_export": base_packet.get("approved_export") or {},
+    }
+    # Backward-compatible aliases for older QA/smoke consumers while new workers use the normalized contract.
+    normalized["active_context"] = normalized["context"]["active_context"]
+    normalized["subject_lock"] = normalized["context"]["reference_lock"]
+    normalized["continuity_rules"] = normalized["context"]["active_context"].get("hard_constraints", [])
+    normalized["negative_rules"] = base_packet.get("negative_constraints") or [normalized["prompt"]["negative"] or normalized["prompt"]["final"] or ""]
+    return normalized
+
+
+def buildPlanningPacket(base_packet: dict, route_decision: dict | None = None) -> dict:
+    return normalise_generation_packet(base_packet=base_packet, task_type="planning", route_decision=route_decision)
+
+
+def buildImageGenerationPacket(base_packet: dict, route_decision: dict | None = None) -> dict:
+    return normalise_generation_packet(base_packet=base_packet, task_type="keyframe_image", route_decision=route_decision)
+
+
+def buildVideoGenerationPacket(
+    *,
+    base_packet: dict,
+    task_type: str,
+    route_decision: dict,
+    input_assets: list[dict] | None = None,
+    output_settings: dict | None = None,
+    upscale_workflow: dict | None = None,
+    compression_workflow: dict | None = None,
+) -> dict:
+    return normalise_generation_packet(
+        base_packet=base_packet,
+        task_type=task_type,
+        route_decision=route_decision,
+        input_assets=input_assets,
+        output_settings=output_settings,
+        upscale_workflow=upscale_workflow,
+        compression_workflow=compression_workflow,
+    )
+
+
+def buildUpscalePacket(base_packet: dict, upscale_workflow: dict, input_assets: list[dict] | None = None) -> dict:
+    return normalise_generation_packet(
+        base_packet=base_packet,
+        task_type="video_upscale",
+        route_decision=upscale_workflow,
+        input_assets=input_assets,
+        upscale_workflow=upscale_workflow,
+    )
+
+
 def build_generation_packet(
     *,
     user_id: str | None,

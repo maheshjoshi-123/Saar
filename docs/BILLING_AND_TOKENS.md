@@ -73,6 +73,22 @@ When enabled, `POST /api/jobs` requires `user_id`. If the wallet balance is belo
 
 When disabled, Saar still calculates and displays job cost, but does not block generation or debit the wallet. This is useful for demos and staging.
 
+## Manual Payment Flow (eSewa)
+
+For regions where automated checkout is not yet integrated, Saar supports a manual payment verification flow.
+
+1. **User Request**: User selects a plan and is shown the eSewa QR code and payment number.
+2. **Payment**: User performs the transfer via eSewa.
+3. **Verification Submission**: User enters their transaction ID/Reference in the dashboard.
+4. **Admin Review**: Admin sees the pending request in the Admin Panel, verifies the transaction, and approves it.
+5. **Credit Grant**: Approving the request automatically grants the purchased credits to the user's wallet.
+
+Endpoints:
+- `POST /api/billing/payment-request` (User)
+- `GET /api/billing/payment-requests` (User)
+- `GET /api/admin/billing/payment-requests` (Admin)
+- `POST /api/admin/billing/payment-requests/{id}/review` (Admin)
+
 ## Admin Credit Tools
 
 Admins can grant credits:

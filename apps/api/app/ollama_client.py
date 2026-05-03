@@ -4,7 +4,7 @@ import urllib.request
 from .config import get_settings
 
 
-def ollama_json(prompt: str, *, model: str | None = None, timeout: int = 120) -> dict | None:
+def ollama_json(prompt: str, *, model: str | None = None, timeout: int = 300) -> dict | None:
     settings = get_settings()
     if not settings.ollama_enabled:
         return None

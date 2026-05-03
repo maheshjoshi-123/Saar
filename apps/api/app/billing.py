@@ -7,6 +7,15 @@ from .models import Coupon, CouponRedemption, CreditLedger, CreditWallet, Ledger
 
 DEFAULT_PLANS = [
     {
+        "key": "pro",
+        "name": "Pro",
+        "price_npr": 1499,
+        "credits": 100,
+        "max_video_seconds": 10,
+        "max_jobs_per_month": 40,
+        "features": ["Pro demo tier", "100 credits", "Scene planning QA", "Coupon testing"],
+    },
+    {
         "key": "starter",
         "name": "Starter",
         "price_npr": 999,
@@ -34,6 +43,11 @@ DEFAULT_PLANS = [
         "features": ["Premium workflows", "Longer videos", "Revision memory", "Admin QA"],
     },
 ]
+
+DEMO_PRO_USER_ID = "china-laptop-seller"
+DEMO_PRO_USER_NAME = "China Laptop Seller"
+DEMO_PRO_TIER = "pro"
+DEMO_PRO_CREDITS = 100
 
 BASE_CREDITS = {
     TaskType.fast_preview: 8,
@@ -127,6 +141,20 @@ def seed_test_coupons(db: Session) -> None:
         coupon = Coupon(**coupon_data)
         db.add(coupon)
     db.commit()
+
+
+def seed_demo_pro_user(db: Session) -> None:
+    """Seed the requested local QA user without creating production auth state."""
+    wallet = get_wallet(db, DEMO_PRO_USER_ID, create=True)
+    if wallet and wallet.lifetime_credits == 0:
+        add_credits(
+            db,
+            user_id=DEMO_PRO_USER_ID,
+            amount=DEMO_PRO_CREDITS,
+            reason="demo pro tier signup credits",
+            ledger_type=LedgerType.grant,
+            meta={"tier": DEMO_PRO_TIER, "name": DEMO_PRO_USER_NAME},
+        )
 
 
 def get_wallet(db: Session, user_id: str, create: bool = True) -> CreditWallet | None:

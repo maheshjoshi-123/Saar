@@ -1,25 +1,26 @@
 import uuid
 from datetime import datetime
-from pathlib import PurePath
+from pathlib import Path, PurePath
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from .config import get_settings
 from .db import get_db, init_db
 from .assurance import build_options_from_assurance, confirm_assurance_plan, create_assurance_plan, create_quality_report, create_revision_request, store_feedback_memory
-from .billing import add_credits, debit_credits, estimate_generation_cost, get_wallet, redeem_coupon, refund_credits, seed_default_plans, seed_test_coupons
+from .billing import DEMO_PRO_CREDITS, DEMO_PRO_TIER, DEMO_PRO_USER_ID, DEMO_PRO_USER_NAME, add_credits, debit_credits, estimate_generation_cost, get_wallet, redeem_coupon, refund_credits, seed_default_plans, seed_demo_pro_user, seed_test_coupons
 from .context_compiler import compile_generation_context
-from .generation_packet import build_generation_packet
+from .generation_packet import buildVideoGenerationPacket, build_generation_packet
 from .intelligence_memory import retrieve_structured_memory
-from .models import AssurancePlan, AssuranceStatus, Asset, AssetType, Coupon, CreditLedger, CreditWallet, Job, JobEvent, JobStatus, LedgerType, MemoryItem, ModelEndpoint, PricingPlan, PromptVersion, QualityReport, RevisionRequest, TaskType
+from .models import AssurancePlan, AssuranceStatus, Asset, AssetType, Coupon, CreditLedger, CreditWallet, Job, JobEvent, JobStatus, LedgerType, MemoryItem, ModelEndpoint, PaymentRequest, PaymentRequestStatus, PricingPlan, PromptVersion, QualityReport, RevisionRequest, TaskType, User
 from .preflight import check_preflight
 from .prompt_refinement import build_intelligence_inputs
+from .media_pipeline import build_delivery_urls
 from .r2 import presign_put, public_url_for_key
-from .router import list_available_endpoints, resolve_endpoint
-from .schemas import AssurancePlanResponse, AuthSessionRequest, AuthSessionResponse, ConfirmAssuranceRequest, ContextPreviewRequest, ContextPreviewResponse, CostEstimateRequest, CostEstimateResponse, CouponIn, CouponOut, CreditGrantRequest, CreateJobRequest, DesireIntakeRequest, FeedbackIn, IntelligencePacketRequest, IntelligencePacketResponse, JobEventResponse, JobResponse, LedgerResponse, MemoryItemIn, MemoryItemOut, ModelEndpointIn, ModelEndpointOut, PlanSubscribeRequest, PresignUploadRequest, PresignUploadResponse, PricingPlanIn, PricingPlanOut, PromptVersionResponse, QualityReportResponse, RedeemCouponRequest, RevisionRequestIn, RevisionRequestOut, UsageSummaryResponse, UserTokenRequest, UserTokenResponse, WalletResponse
+from .router import list_available_endpoints, resolve_endpoint, selectCompressionWorkflow, selectUpscaleWorkflow, selectVideoGenerationModel
+from .schemas import AdminUserSummary, AssetResponse, AssurancePlanResponse, AuthSessionRequest, AuthSessionResponse, ConfirmAssuranceRequest, ContextPreviewRequest, ContextPreviewResponse, CostEstimateRequest, CostEstimateResponse, CouponIn, CouponOut, CreditGrantRequest, CreateJobRequest, DesireIntakeRequest, FeedbackIn, IntelligencePacketRequest, IntelligencePacketResponse, JobEventResponse, JobResponse, LedgerResponse, MemoryItemIn, MemoryItemOut, ModelEndpointIn, ModelEndpointOut, PaymentRequestIn, PaymentRequestOut, PaymentRequestReview, PlanSubscribeRequest, PresignUploadRequest, PresignUploadResponse, PricingPlanIn, PricingPlanOut, PromptVersionResponse, QualityReportResponse, RedeemCouponRequest, RevisionRequestIn, RevisionRequestOut, UsageSummaryResponse, UserTokenRequest, UserTokenResponse, WalletResponse
 from .security import check_rate_limit, require_admin_token, require_api_token, require_user_scope, sign_user_token, validate_runtime_security
 from .tasks import process_job
 
@@ -36,7 +37,10 @@ async def lifespan(app: FastAPI):
         db = SessionLocal()
         try:
             seed_default_plans(db)
-            seed_test_coupons(db)
+            if not settings.is_production_like and settings.mock_payments_enabled:
+                seed_test_coupons(db)
+            if not settings.is_production_like and settings.demo_auth_enabled:
+                seed_demo_pro_user(db)
         finally:
             db.close()
     yield
@@ -110,7 +114,31 @@ def _duration_from_options(options: dict) -> int:
         return 6
 
 
+def _asset_summary(asset: Asset | None) -> dict | None:
+    if not asset:
+        return None
+    return {
+        "asset_id": asset.id,
+        "r2_key": asset.r2_key,
+        "public_url": asset.public_url,
+        "type": asset.type.value,
+        "mime_type": asset.mime_type,
+        "file_size": asset.file_size,
+    }
+
+
+def _local_upload_enabled() -> bool:
+    return settings.runpod_mock and not settings.is_production_like
+
+
+def _local_upload_path(asset_id: str) -> Path:
+    root = Path("var/uploads")
+    root.mkdir(parents=True, exist_ok=True)
+    return root / asset_id
+
+
 def _scoped_user(user_id: str | None, x_saar_user_id: str | None, x_saar_user_token: str | None) -> str | None:
+    # TODO: keep USER_AUTH_ENFORCED=true in production so user_id cannot be spoofed from the client.
     return require_user_scope(user_id, x_saar_user_id, x_saar_user_token)
 
 
@@ -149,11 +177,19 @@ def demo_auth_session(body: AuthSessionRequest, db: Session = Depends(get_db)) -
     if not settings.demo_auth_enabled:
         raise HTTPException(status_code=403, detail="Demo auth is disabled. Connect a real identity provider for production login.")
     wallet = get_wallet(db, body.user_id, create=True)
-    # Give test users 100 credits on first login for testing
+    # Give local demo users enough credits for one proper QA pass without creating production auth state.
     if wallet and wallet.lifetime_credits == 0:
-        add_credits(db, user_id=body.user_id, amount=100, reason="demo_signup_bonus", ledger_type=LedgerType.grant)
+        add_credits(
+            db,
+            user_id=body.user_id,
+            amount=DEMO_PRO_CREDITS,
+            reason="demo pro tier signup credits",
+            ledger_type=LedgerType.grant,
+            meta={"tier": DEMO_PRO_TIER},
+        )
     token = sign_user_token(body.user_id, settings.user_auth_secret) if settings.user_auth_secret else ""
-    return AuthSessionResponse(user_id=body.user_id, token=token, name=body.name, demo=True)
+    display_name = body.name or (DEMO_PRO_USER_NAME if body.user_id == DEMO_PRO_USER_ID else body.user_id)
+    return AuthSessionResponse(user_id=body.user_id, token=token, name=display_name, demo=True, tier=DEMO_PRO_TIER)
 
 
 @app.post("/api/assets/presign-upload", response_model=PresignUploadResponse, dependencies=[Depends(require_api_token)])
@@ -163,15 +199,53 @@ def presign_upload(body: PresignUploadRequest, db: Session = Depends(get_db), x_
         raise HTTPException(status_code=400, detail="Unsupported upload content type")
     if body.file_size and body.file_size > settings.presign_upload_max_bytes:
         raise HTTPException(status_code=413, detail=f"File is too large. Maximum is {settings.presign_upload_max_bytes} bytes")
+    # TODO: add server-side MIME sniffing and malware scanning before production accepts customer uploads.
     safe_name = PurePath(body.filename.replace("\\", "/")).name.replace(" ", "_")
     if not safe_name or safe_name in {".", ".."}:
         raise HTTPException(status_code=400, detail="Invalid filename")
     key = f"inputs/{body.user_id or 'anonymous'}/{uuid.uuid4()}-{safe_name}"
-    asset = Asset(user_id=body.user_id, type=body.asset_type, r2_key=key, public_url=public_url_for_key(key), mime_type=body.content_type, file_size=body.file_size)
+    public_url = public_url_for_key(key)
+    upload_url = None
+    if public_url:
+        upload_url = presign_put(key, body.content_type)
+    elif not _local_upload_enabled():
+        raise HTTPException(status_code=503, detail="Cloudflare R2 is not configured. Set R2 credentials or use RUNPOD_MOCK=true in development.")
+    asset = Asset(user_id=body.user_id, type=body.asset_type, r2_key=key, public_url=public_url, mime_type=body.content_type, file_size=body.file_size)
     db.add(asset)
     db.commit()
     db.refresh(asset)
-    return PresignUploadResponse(asset_id=asset.id, upload_url=presign_put(key, body.content_type), r2_key=key, public_url=asset.public_url)
+    if _local_upload_enabled() and not upload_url:
+        asset.public_url = f"{settings.frontend_url.rstrip('/')}/api/proxy/api/assets/mock-file/{asset.id}"
+        db.commit()
+        db.refresh(asset)
+        upload_url = f"{settings.frontend_url.rstrip('/')}/api/proxy/api/assets/mock-upload/{asset.id}"
+    return PresignUploadResponse(asset_id=asset.id, upload_url=upload_url, r2_key=key, public_url=asset.public_url)
+
+
+@app.put("/api/assets/mock-upload/{asset_id}")
+async def mock_upload_asset(asset_id: str, request: Request, db: Session = Depends(get_db)) -> dict:
+    if not _local_upload_enabled():
+        raise HTTPException(status_code=404, detail="Local mock uploads are disabled")
+    asset = db.get(Asset, asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    data = await request.body()
+    if len(data) > settings.presign_upload_max_bytes:
+        raise HTTPException(status_code=413, detail="File is too large")
+    path = _local_upload_path(asset_id)
+    path.write_bytes(data)
+    return {"ok": True, "asset_id": asset_id, "bytes": len(data)}
+
+
+@app.get("/api/assets/mock-file/{asset_id}")
+def mock_asset_file(asset_id: str, db: Session = Depends(get_db)) -> FileResponse:
+    if not _local_upload_enabled():
+        raise HTTPException(status_code=404, detail="Local mock files are disabled")
+    asset = db.get(Asset, asset_id)
+    path = _local_upload_path(asset_id)
+    if not asset or not path.exists():
+        raise HTTPException(status_code=404, detail="Asset file not found")
+    return FileResponse(path, media_type=asset.mime_type or "application/octet-stream")
 
 
 @app.post("/api/jobs", response_model=JobResponse, dependencies=[Depends(require_api_token)])
@@ -195,17 +269,25 @@ def create_job(body: CreateJobRequest, db: Session = Depends(get_db), x_saar_use
     else:
         asset = None
 
+    input_assets = [asset] if asset else []
+    try:
+        selected_task_type, endpoint, route_decision = selectVideoGenerationModel(
+            db,
+            requested_task_type=body.task_type,
+            input_assets=input_assets,
+            options=body.options,
+            model_key=body.model_key,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Model routing failed: {exc}") from exc
+    body.task_type = selected_task_type
+
     if body.task_type in {TaskType.image_to_video, TaskType.video_upscale} and not asset:
         raise HTTPException(status_code=400, detail=f"{body.task_type.value} requires input_asset_id")
     if body.task_type == TaskType.image_to_video and asset and asset.type != AssetType.image:
         raise HTTPException(status_code=400, detail="image_to_video requires an image asset")
     if body.task_type == TaskType.video_upscale and asset and asset.type != AssetType.video:
         raise HTTPException(status_code=400, detail="video_upscale requires a video asset")
-
-    try:
-        endpoint = resolve_endpoint(db, body.task_type, body.model_key)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Model routing failed: {exc}") from exc
 
     try:
         compiled = compile_generation_context(
@@ -224,6 +306,38 @@ def create_job(body: CreateJobRequest, db: Session = Depends(get_db), x_saar_use
 
     duration_seconds = _duration_from_options(body.options)
     quality = body.options.get("quality") or ("premium" if body.task_type == TaskType.premium_quality else "standard")
+    upscale_workflow = selectUpscaleWorkflow(db, quality=quality, options=body.options)
+    compression_workflow = selectCompressionWorkflow(options=body.options)
+    option_assets = body.options.get("input_assets") if isinstance(body.options.get("input_assets"), list) else []
+    packet_assets = [item for item in [_asset_summary(asset), *option_assets] if isinstance(item, dict)]
+    compiled_packet = compiled.generation_packet if isinstance(compiled.generation_packet, dict) else {}
+    compiled_settings = compiled_packet.get("settings") if isinstance(compiled_packet.get("settings"), dict) else {}
+    normalized_packet = buildVideoGenerationPacket(
+        base_packet={
+            **compiled_packet,
+            "user_id": body.user_id,
+            "project_id": body.options.get("project_id"),
+            "route": body.options.get("source_route") or body.options.get("route") or "direct_video",
+            "settings": {**compiled_settings, **body.options},
+            "raw_prompt": body.prompt,
+            "final_video_prompt": compiled.final_prompt,
+            "negative_constraints": compiled_packet.get("negative_constraints", []),
+            "memory_used": compiled_packet.get("memory_used", {}),
+            "active_context": compiled_packet.get("active_context", {}),
+        },
+        task_type=body.task_type.value,
+        route_decision=route_decision,
+        input_assets=packet_assets,
+        output_settings={
+            "duration_seconds": duration_seconds,
+            "quality": quality,
+            "target_format": body.options.get("target_format") or "mp4",
+            "storage_provider": "cloudflare_r2",
+            "output_prefix": f"outputs/pending",
+        },
+        upscale_workflow=upscale_workflow,
+        compression_workflow=compression_workflow,
+    )
     estimate = estimate_generation_cost(body.task_type, duration_seconds=duration_seconds, quality=quality, complexity_score=compiled.complexity_score, model_key=endpoint.key)
     if settings.billing_enforced:
         if not body.user_id:
@@ -241,7 +355,7 @@ def create_job(body: CreateJobRequest, db: Session = Depends(get_db), x_saar_use
         input_asset_id=body.input_asset_id,
         model_key=endpoint.key,
         runpod_endpoint_id=endpoint.endpoint_id,
-        options={**body.options, "compiled": True, "complexity_score": compiled.complexity_score, "complexity_decision": compiled.complexity_decision, "required_credits": estimate["required_credits"], "estimated_gpu_seconds": estimate["estimated_gpu_seconds"], "billing_debited": False},
+        options={**body.options, "compiled": True, "route_decision": route_decision, "upscale_workflow": upscale_workflow, "compression_workflow": compression_workflow, "complexity_score": compiled.complexity_score, "complexity_decision": compiled.complexity_decision, "required_credits": estimate["required_credits"], "estimated_gpu_seconds": estimate["estimated_gpu_seconds"], "billing_debited": False},
     )
     db.add(job)
     db.commit()
@@ -250,7 +364,7 @@ def create_job(body: CreateJobRequest, db: Session = Depends(get_db), x_saar_use
         job_id=job.id,
         raw_prompt=body.prompt,
         clean_brief=compiled.clean_brief,
-        generation_packet=compiled.generation_packet,
+        generation_packet={**normalized_packet, "output": {**normalized_packet.get("output", {}), "output_prefix": f"outputs/{job.id}"}},
         final_prompt=compiled.final_prompt,
         negative_prompt=compiled.negative_prompt,
         complexity_score=compiled.complexity_score,
@@ -559,6 +673,80 @@ def get_billing_ledger(user_id: str, db: Session = Depends(get_db), x_saar_user_
     return list(db.execute(select(CreditLedger).where(CreditLedger.user_id == user_id).order_by(CreditLedger.created_at.desc()).limit(100)).scalars().all())
 
 
+@app.post("/api/billing/payment-request", response_model=PaymentRequestOut, dependencies=[Depends(require_api_token)])
+def create_payment_request(body: PaymentRequestIn, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> PaymentRequest:
+    body.user_id = _scoped_user(body.user_id, x_saar_user_id, x_saar_user_token)
+    plan = db.execute(select(PricingPlan).where(PricingPlan.key == body.plan_key, PricingPlan.is_active.is_(True))).scalars().first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Pricing plan not found or inactive")
+    
+    # Check if a pending request with the same transaction_id already exists
+    existing = db.execute(select(PaymentRequest).where(PaymentRequest.transaction_id == body.transaction_id)).scalars().first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Transaction ID already submitted")
+
+    request = PaymentRequest(
+        user_id=body.user_id,
+        plan_key=body.plan_key,
+        amount_npr=plan.price_npr,
+        credits=plan.credits,
+        payment_method=body.payment_method,
+        transaction_id=body.transaction_id,
+        status=PaymentRequestStatus.pending
+    )
+    db.add(request)
+    db.commit()
+    db.refresh(request)
+    return request
+
+
+@app.get("/api/billing/payment-requests", response_model=list[PaymentRequestOut], dependencies=[Depends(require_api_token)])
+def list_user_payment_requests(user_id: str, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> list[PaymentRequest]:
+    _scoped_user(user_id, x_saar_user_id, x_saar_user_token)
+    return list(db.execute(select(PaymentRequest).where(PaymentRequest.user_id == user_id).order_by(PaymentRequest.created_at.desc())).scalars().all())
+
+
+@app.get("/api/admin/billing/payment-requests", response_model=list[PaymentRequestOut], dependencies=[Depends(require_admin_token)])
+def admin_list_payment_requests(status: PaymentRequestStatus | None = None, db: Session = Depends(get_db)) -> list[PaymentRequest]:
+    query = select(PaymentRequest)
+    if status:
+        query = query.where(PaymentRequest.status == status)
+    return list(db.execute(query.order_by(PaymentRequest.created_at.desc()).limit(100)).scalars().all())
+
+
+@app.post("/api/admin/billing/payment-requests/{request_id}/review", response_model=PaymentRequestOut, dependencies=[Depends(require_admin_token)])
+def admin_review_payment_request(request_id: str, body: PaymentRequestReview, db: Session = Depends(get_db)) -> PaymentRequest:
+    request = db.get(PaymentRequest, request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="Payment request not found")
+    
+    if request.status != PaymentRequestStatus.pending:
+        raise HTTPException(status_code=400, detail="Payment request is already reviewed")
+
+    request.status = body.status
+    request.admin_notes = body.admin_notes
+    request.updated_at = datetime.utcnow()
+
+    if body.status == PaymentRequestStatus.approved:
+        add_credits(
+            db,
+            user_id=request.user_id,
+            amount=request.credits,
+            reason=f"Approved eSewa payment for {request.plan_key} plan",
+            ledger_type=LedgerType.grant,
+            meta={
+                "payment_request_id": request.id,
+                "plan_key": request.plan_key,
+                "transaction_id": request.transaction_id,
+                "amount_npr": request.amount_npr
+            }
+        )
+    
+    db.commit()
+    db.refresh(request)
+    return request
+
+
 @app.post("/api/billing/subscribe", response_model=WalletResponse, dependencies=[Depends(require_api_token)])
 def subscribe_plan(body: PlanSubscribeRequest, db: Session = Depends(get_db), x_saar_user_id: str | None = Header(default=None), x_saar_user_token: str | None = Header(default=None)) -> CreditWallet:
     body.user_id = _scoped_user(body.user_id, x_saar_user_id, x_saar_user_token)
@@ -609,6 +797,47 @@ def admin_usage_summary(db: Session = Depends(get_db)) -> UsageSummaryResponse:
         jobs_by_model=jobs_by_model,
         credits_by_user=credits_by_user,
     )
+
+
+@app.get("/api/admin/users", response_model=list[AdminUserSummary], dependencies=[Depends(require_admin_token)])
+def admin_list_users(db: Session = Depends(get_db)) -> list[AdminUserSummary]:
+    users = {row.email: row for row in db.execute(select(User)).scalars().all()}
+    wallets = list(db.execute(select(CreditWallet).order_by(CreditWallet.updated_at.desc()).limit(1000)).scalars().all())
+    jobs = list(db.execute(select(Job).order_by(Job.created_at.desc()).limit(10000)).scalars().all())
+    ids = set(users.keys()) | {wallet.user_id for wallet in wallets} | {job.user_id for job in jobs if job.user_id}
+    wallets_by_user = {wallet.user_id: wallet for wallet in wallets}
+    summaries: list[AdminUserSummary] = []
+    for user_id in sorted(ids):
+        user_jobs = [job for job in jobs if job.user_id == user_id]
+        wallet = wallets_by_user.get(user_id)
+        user = users.get(user_id)
+        summaries.append(
+            AdminUserSummary(
+                user_id=user_id,
+                name=user.name if user else None,
+                role=user.role if user else None,
+                wallet_balance=wallet.balance if wallet else 0,
+                lifetime_credits=wallet.lifetime_credits if wallet else 0,
+                lifetime_spent=wallet.lifetime_spent if wallet else 0,
+                total_jobs=len(user_jobs),
+                completed_jobs=sum(1 for job in user_jobs if job.status == JobStatus.completed),
+                failed_jobs=sum(1 for job in user_jobs if job.status == JobStatus.failed),
+                last_job_at=max((job.created_at for job in user_jobs), default=None),
+                created_at=user.created_at if user else None,
+            )
+        )
+    return summaries[:250]
+
+
+@app.get("/api/admin/jobs", response_model=list[JobResponse], dependencies=[Depends(require_admin_token)])
+def admin_list_jobs(limit: int = Query(default=100, ge=1, le=500), db: Session = Depends(get_db)) -> list[JobResponse]:
+    jobs = list(db.execute(select(Job).order_by(Job.created_at.desc()).limit(limit)).scalars().all())
+    return [to_job_response(job) for job in jobs]
+
+
+@app.get("/api/admin/assets", response_model=list[AssetResponse], dependencies=[Depends(require_admin_token)])
+def admin_list_assets(limit: int = Query(default=100, ge=1, le=500), db: Session = Depends(get_db)) -> list[Asset]:
+    return list(db.execute(select(Asset).order_by(Asset.created_at.desc()).limit(limit)).scalars().all())
 
 
 @app.post("/api/admin/billing/grant", response_model=WalletResponse, dependencies=[Depends(require_admin_token)])
@@ -667,6 +896,17 @@ def admin_create_coupon(body: CouponIn, db: Session = Depends(get_db)) -> Coupon
 @app.get("/api/admin/coupons", response_model=list[CouponOut], dependencies=[Depends(require_admin_token)])
 def admin_list_coupons(db: Session = Depends(get_db)) -> list[Coupon]:
     return list(db.execute(select(Coupon).order_by(Coupon.created_at.desc()).limit(100)).scalars().all())
+
+
+@app.post("/api/admin/coupons/{coupon_id}/disable", response_model=CouponOut, dependencies=[Depends(require_admin_token)])
+def admin_disable_coupon(coupon_id: str, db: Session = Depends(get_db)) -> Coupon:
+    coupon = db.get(Coupon, coupon_id)
+    if not coupon:
+        raise HTTPException(status_code=404, detail="Coupon not found")
+    coupon.is_active = False
+    db.commit()
+    db.refresh(coupon)
+    return coupon
 
 
 @app.post("/api/coupons/redeem", response_model=WalletResponse, dependencies=[Depends(require_api_token)])
@@ -778,9 +1018,12 @@ def runpod_webhook(payload: dict, x_saar_token: str | None = Header(default=None
 
 
 def to_job_response(job: Job) -> JobResponse:
+    # TODO: replace public playback URLs with signed/expiring URLs if generated videos must be private.
     output_url = job.output_asset.public_url if job.output_asset else None
+    delivery = build_delivery_urls(job.output_asset)
     return JobResponse(
         id=job.id,
+        user_id=job.user_id,
         task_type=job.task_type,
         status=job.status,
         prompt=job.prompt,
@@ -791,6 +1034,10 @@ def to_job_response(job: Job) -> JobResponse:
         input_asset_id=job.input_asset_id,
         output_asset_id=job.output_asset_id,
         output_url=output_url,
+        playbackUrl=delivery["playback_url"],
+        cloudflareUrl=output_url,
+        download_url=delivery["download_url"],
+        thumbnail_url=delivery["thumbnail_url"],
         complexity_score=job.options.get("complexity_score") if isinstance(job.options, dict) else None,
         complexity_decision=job.options.get("complexity_decision") if isinstance(job.options, dict) else None,
         required_credits=job.options.get("required_credits") if isinstance(job.options, dict) else None,

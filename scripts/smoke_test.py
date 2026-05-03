@@ -6,8 +6,10 @@ from uuid import uuid4
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-SMOKE_DB = Path(f"saar_smoke_{uuid4().hex}.db")
-os.environ["DATABASE_URL"] = f"sqlite:///./{SMOKE_DB.name}"
+from scripts.runtime_paths import runtime_db  # noqa: E402
+
+SMOKE_DB = runtime_db(f"saar_smoke_{uuid4().hex}.db")
+os.environ["DATABASE_URL"] = f"sqlite:///{SMOKE_DB.as_posix()}"
 os.environ.setdefault("QUEUE_MODE", "inline")
 os.environ.setdefault("RUNPOD_MOCK", "true")
 os.environ.setdefault("WORKFLOW_DIR", "workflows")
@@ -166,8 +168,8 @@ def main() -> None:
         )
         assert plan_packet.status_code == 200, plan_packet.text
         plan_body = plan_packet.json()
-        assert len(plan_body["scene_plan"]) == 2, plan_packet.text
-        assert len(plan_body["reference_images"]) == 2, plan_packet.text
+        assert len(plan_body["scene_plan"]) == 3, plan_packet.text
+        assert len(plan_body["reference_images"]) == 3, plan_packet.text
         assert len(plan_body["keyframes"]) >= 3, plan_packet.text
         assert all(item["image_prompt"] for item in plan_body["keyframes"]), plan_packet.text
         assert all(item["image_path"] for item in plan_body["keyframes"]), plan_packet.text
@@ -332,6 +334,21 @@ def main() -> None:
         assert usage.status_code == 200, usage.text
         assert usage.json()["total_jobs"] >= 1, usage.text
         assert usage.json()["jobs_by_model"].get("wan22_t2v", 0) >= 1, usage.text
+
+        admin_users = client.get("/api/admin/users", headers=admin_headers)
+        assert admin_users.status_code == 200, admin_users.text
+        assert any(row["user_id"] == "smoke-user" for row in admin_users.json()), admin_users.text
+
+        admin_jobs = client.get("/api/admin/jobs", headers=admin_headers)
+        assert admin_jobs.status_code == 200, admin_jobs.text
+        assert any(row["id"] == job["id"] for row in admin_jobs.json()), admin_jobs.text
+
+        admin_assets = client.get("/api/admin/assets", headers=admin_headers)
+        assert admin_assets.status_code == 200, admin_assets.text
+
+        disabled_coupon = client.post(f"/api/admin/coupons/{coupon.json()['id']}/disable", headers=admin_headers)
+        assert disabled_coupon.status_code == 200, disabled_coupon.text
+        assert disabled_coupon.json()["is_active"] is False, disabled_coupon.text
 
         assert extract_output_url({"images": [{"filename": "x.png", "type": "s3_url", "data": "https://cdn.example.com/x.png"}]}) == "https://cdn.example.com/x.png"
         assert extract_output_url({"videos": [{"filename": "x.mp4", "type": "s3_url", "data": "https://cdn.example.com/x.mp4"}]}) == "https://cdn.example.com/x.mp4"
